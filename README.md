@@ -84,6 +84,18 @@ Finished proposal section ↑ @deep [FLOW]
 
 ---
 
+## Intelligence
+
+**Drift Alert:** Notification after 90+ minutes without logging
+
+**Win Prompt:** Celebration trigger at 10 entries
+
+**Morning Intention:** First log of day prompts daily focus
+
+**Pattern Analysis:** (Planned) Weekly insights from tags and flags
+
+---
+
 ## Data
 
 ### Storage
@@ -113,18 +125,6 @@ Human-readable daily logs. One file per day.
 
 **Win:** Finished proposal draft despite rough start
 ```
-
----
-
-## Intelligence
-
-**Drift Alert:** Notification after 90+ minutes without logging
-
-**Win Prompt:** Celebration trigger at 10 entries
-
-**Morning Intention:** First log of day prompts daily focus
-
-**Pattern Analysis:** (Planned) Weekly insights from tags and flags
 
 ---
 

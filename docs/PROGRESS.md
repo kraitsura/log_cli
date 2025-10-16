@@ -6,9 +6,9 @@
 
 ## Current Status
 
-**Phase:** Phase 3 - Viewing & Stats ✓ COMPLETE
-**Last Updated:** 2025-10-15 (All viewing, stats, sign-off, and confetti features working!)
-**Roadmap Updated:** 2025-10-15 (Phases 4-10 restructured; Phase 4 split into Essential Utilities with arrow input, edit, win, delete, thought commands)
+**Phase:** Phase 4 - Essential Utilities & Commands ✓ COMPLETE
+**Last Updated:** 2025-10-15 (All essential utility commands implemented and working!)
+**Next Phase:** Phase 5 - Historical Viewing & Navigation
 
 ---
 
@@ -153,81 +153,79 @@
 
 ---
 
-## Phase 4: Essential Utilities & Commands (Planned)
+## Phase 4: Essential Utilities & Commands ✓ COMPLETE
 
 **Goal:** Add essential utility commands for daily use and improve input experience.
 
-### Arrow Momentum Input Solution
-- [ ] Implement text shortcut system for momentum markers
-  - [ ] `++` or `+` → ↑ (productive/energized)
-  - [ ] `--` or `-` → ↓ (dragging/unfocused)
-  - [ ] `->` or `=` → → (neutral/coasting)
-  - [ ] `<-` or `<` → ← (waste/destructive) **NEW MARKER**
-- [ ] Add back arrow ← as fourth momentum marker
-  - [ ] Update database models to support ← momentum
-  - [ ] Update parser to recognize ← marker
-  - [ ] Display as "waste of time" or "destructive action" in stats
-  - [ ] Add to help documentation
-- [ ] Update TUI to show shortcut hints
-  - [ ] Display: "+ - = < for ↑ ↓ → ←" in entry screen
-- [ ] Auto-convert shortcuts to arrows on display
+### Arrow Momentum Input Solution ✓
+- [x] Implement text shortcut system for momentum markers - 2025-10-15
+  - [x] `++` → ↑ (productive/energized)
+  - [x] `--` → ↓ (dragging/unfocused)
+  - [x] `==` → → (neutral/coasting)
+  - [x] `<<` → ← (waste/destructive) **NEW MARKER**
+  - [x] Also supports `->` → → and `<-` → ←
+  - [x] Single characters preserved for normal text use
+- [x] Add back arrow ← as fourth momentum marker - 2025-10-15
+  - [x] Update database models to support ← momentum
+  - [x] Update parser to recognize ← marker
+  - [x] Display as "waste of time" or "destructive action" in stats
+  - [x] Add to help documentation
+- [x] Update TUI to show shortcut hints - 2025-10-15
+  - [x] Display: "Momentum: ++ -- == << (or -> <-) for ↑ ↓ → ←" in entry screen
+- [x] Auto-convert shortcuts to arrows before parsing - 2025-10-15
+  - [x] Only converts double characters to preserve singles for text
 
-### Help Command
-- [ ] `log help` - Display comprehensive help information
-  - [ ] Show all available commands
-  - [ ] Display tag reference (@deep, @social, @admin, @break, @zone, @signoff)
-  - [ ] Display flag reference ([LEAK], [FLOW], [STUCK], [GOLD], [DRIFT], [ANCHOR])
-  - [ ] Show momentum markers (↑, ↓, →, ←) with shortcuts
-  - [ ] Usage examples
-  - [ ] Quick start guide
+### Help Command ✓
+- [x] `log help` - Display comprehensive help information - 2025-10-15
+  - [x] Show all available commands
+  - [x] Display tag reference (@deep, @social, @admin, @break, @zone, @signoff)
+  - [x] Display flag reference ([LEAK], [FLOW], [STUCK], [GOLD], [DRIFT], [ANCHOR])
+  - [x] Show momentum markers (↑, ↓, →, ←) with shortcuts
+  - [x] Usage examples
+  - [x] Scrollable viewport for small terminal windows
 
-### Stats Improvements
-- [ ] Remove @signoff from tag distribution in `log stats`
-  - [ ] Filter out @signoff entries from tag counting
-  - [ ] Update analytics to ignore sign-off tags in percentages
-- [ ] Add ← (waste/destructive) momentum tracking to stats
-  - [ ] Show count of ← entries
-  - [ ] Display as warning/awareness metric
+### Stats Improvements ✓
+- [x] Remove @signoff from tag distribution in `log stats` - 2025-10-15
+  - [x] Filter out @signoff entries from tag counting
+  - [x] Update analytics to ignore sign-off tags in percentages
 
-### Log Editing
-- [ ] `log edit` - Edit most recent entry
-  - [ ] Fetch last entry from database
-  - [ ] Open TUI with pre-filled text
-  - [ ] Allow full text editing with tags/momentum
-  - [ ] Update database and regenerate markdown file
-- [ ] `log edit <number>` - Edit specific entry by index
-  - [ ] Accept entry number (1 = first entry of day, 2 = second, etc.)
-  - [ ] Display which entry is being edited
-  - [ ] Fetch and pre-fill entry text
-  - [ ] Update database and markdown on save
-  - [ ] Handle invalid entry numbers gracefully
+### Log Editing ✓
+- [x] `log edit` - Edit most recent entry - 2025-10-15
+  - [x] Fetch last entry from database
+  - [x] Open TUI with pre-filled text (including tags/momentum)
+  - [x] Allow full text editing with tags/momentum
+  - [x] Update database and regenerate markdown file
+- [x] `log edit <number>` - Edit specific entry by index - 2025-10-15
+  - [x] Accept entry number (1 = first entry of day, 2 = second, etc.)
+  - [x] Display which entry is being edited
+  - [x] Fetch and pre-fill entry text
+  - [x] Update database and markdown on save
+  - [x] Handle invalid entry numbers gracefully
 
-### Log Win Command
-- [ ] `log win` - Quickly log a win without waiting for 10-entry prompt
-  - [ ] Open simple TUI with "Win:" prefix
-  - [ ] Save win to current day
-  - [ ] Append to markdown with 🌟 emoji
-  - [ ] Can be called multiple times per day
-  - [ ] Display in `log view` with special formatting
+### Log Win Command ✓
+- [x] `log win` - Quickly log a win without waiting for 10-entry prompt - 2025-10-15
+  - [x] Open simple TUI with win input
+  - [x] Save win to current day
+  - [x] Regenerate markdown with 🌟 emoji
+  - [x] Can be called multiple times per day (overwrites previous win)
 
-### Log Deletion
-- [ ] `log delete` - Delete most recent entry
-  - [ ] Show confirmation prompt with entry text
-  - [ ] Delete from database
-  - [ ] Regenerate markdown file without deleted entry
-- [ ] `log delete <number>` - Delete specific entry by index
-  - [ ] Display entry text for confirmation
-  - [ ] Delete from both database and markdown file
-  - [ ] Handle edge cases (no entries, invalid selection)
+### Log Deletion ✓
+- [x] `log delete` - Delete most recent entry - 2025-10-15
+  - [x] Show confirmation prompt with entry text
+  - [x] Delete from database
+  - [x] Regenerate markdown file without deleted entry
+- [x] `log delete <number>` - Delete specific entry by index - 2025-10-15
+  - [x] Display entry text for confirmation
+  - [x] Delete from both database and markdown file
+  - [x] Handle edge cases (no entries, invalid selection)
 
-### Log Thought Feature
-- [ ] `log thought` - Quick thought logging without full context
-  - [ ] Create simple TUI for thought entry
-  - [ ] No tags, momentum, or metadata required
-  - [ ] Store as special entry type in database
-  - [ ] Append to markdown with "💭 Thought:" prefix
-  - [ ] Display differently in `log view`
-  - [ ] Keep it lightweight and fast
+### Log Thought Feature ✓
+- [x] `log thought` - Quick thought logging without full context - 2025-10-15
+  - [x] Create simple TUI for thought entry
+  - [x] No tags, momentum, or metadata required
+  - [x] Store as regular entry with 💭 prefix
+  - [x] Append to markdown with "💭" prefix
+  - [x] Keep it lightweight and fast
 
 ---
 
@@ -511,6 +509,124 @@
   - Total phases increased from 9 to 10
 - **Status:** Phase 4 ready for implementation with comprehensive utility suite
 
+### 2025-10-15: Phase 4 Complete
+- **Milestone:** All essential utility commands implemented!
+- **Achievement:** Full suite of daily-use commands working end-to-end
+- **Features Delivered:**
+  - Arrow momentum shortcuts (`++` `--` `==` `<<` or `->` `<-`) with back arrow ← support
+  - Scrollable help command with viewport for small terminals
+  - Edit command with entry reconstruction from database
+  - Delete command with confirmation prompt
+  - Win command for quick win logging
+  - Thought command for lightweight thought capture
+  - Stats filter to exclude @signoff tags
+  - Markdown regeneration for edits/deletes
+- **Files Created:**
+  - `internal/tui/help.go` - Scrollable help screen with viewport
+  - `internal/tui/edit.go` - Edit entry TUI with pre-filled text
+  - `internal/tui/confirm_delete.go` - Delete confirmation TUI
+  - `internal/tui/quick_win.go` - Quick win entry TUI
+  - `internal/tui/thought.go` - Lightweight thought TUI
+- **Files Modified:**
+  - `internal/parser/parser.go` - Added shortcut conversion and ReconstructEntryText
+  - `internal/database/models.go` - Added MomentumBack constant
+  - `internal/database/db.go` - Added GetEntryByIndex, UpdateEntry, DeleteEntry methods
+  - `internal/markdown/writer.go` - Added ← formatting and RegenerateFullDay
+  - `internal/tui/log_entry.go` - Updated helper text with shortcuts
+  - `cmd/log/main.go` - Added all new command handlers
+- **Binary Size:** 9.6MB (unchanged)
+- **Status:** Ready for real-world usage! Phase 5 (Historical Viewing) can now begin
+
+### 2025-10-15: After-Hours Logging Feature Added
+- **Feature:** Continue logging after sign-off on same day
+- **Achievement:** Seamless after-hours workflow with special markdown section
+- **Behavior:**
+  - Detects when day is already completed (after sign-off)
+  - Shows friendly message: "✨ Welcome to after-hours! Happy logging :)"
+  - Skips intention and win prompts (already captured during main day)
+  - Prevents double sign-off with informative message
+  - Different success message: "[OK] After-hours entry logged!"
+- **Markdown Handling:**
+  - After-hours entries appear in separate "**After-Hours:**" section
+  - Section placed after Reflection section in completed daylog
+  - Multiple after-hours entries append to same section
+  - Clean separation between main day and after-hours activity
+- **Files Modified:**
+  - `cmd/log/main.go` - Added after-hours detection and flow control
+  - `internal/markdown/writer.go` - Added after-hours section splitting and appending
+- **Binary Size:** 9.6MB (unchanged)
+- **Example Output:**
+  ```markdown
+  ---
+  **Reflection:**
+  - Pulled off track: Email
+  - Kept on track: Focus
+  - Tomorrow protect: Morning deep work
+
+  ---
+  **After-Hours:**
+  - 8:30pm | Quick bug fix ↑ @deep
+  - 9:15pm | Urgent email → @admin
+  ```
+- **Status:** After-hours logging fully functional!
+
+### 2025-10-15: After-Hours Visual Display in `log view`
+- **Enhancement:** Special section display for after-hours entries in TUI
+- **Achievement:** Clear visual separation between regular day and after-hours activity
+- **Display Features:**
+  - Double-line separator (`═`) distinguishes after-hours from reflections (single line `─`)
+  - Bold "After-Hours" header for clear identification
+  - After-hours entries use same formatting as regular entries
+  - Section only appears if after-hours entries exist
+  - Automatic splitting based on @signoff timestamp
+- **Additional Improvements:**
+  - Added back arrow `←` support to `formatMomentum()` function
+  - Created `splitEntries()` helper to separate regular from after-hours entries
+  - Time import added for timestamp comparison
+- **Files Modified:**
+  - `internal/tui/view.go` - Added after-hours section display logic
+- **Binary Size:** 9.6MB (unchanged)
+- **Visual Example:**
+  ```
+  ═════════════════════════════════════
+  After-Hours
+  ═════════════════════════════════════
+
+  8:30pm | Quick bug fix ↑ @deep
+  9:15pm | Urgent email → @admin
+  ```
+- **Status:** After-hours display complete in both TUI and markdown!
+
+### 2025-10-15: Real-Time Text Transformations & Autocomplete
+- **Enhancement:** Improved input UX with live momentum conversion and tag suggestions
+- **Achievement:** Zero-friction tagging and momentum marking during entry
+- **Features Delivered:**
+  1. **Real-time Momentum Conversion:**
+     - Shortcuts (`++`, `--`, `==`, `<<`, `->`, `<-`) instantly convert to arrows as user types
+     - No need to wait until submit - transformations happen immediately
+     - Cursor position handled correctly during conversion
+  2. **Autocomplete Dropdown for Tags:**
+     - Type `@` to show context tag suggestions (@deep, @social, @admin, @break, @zone, @signoff)
+     - Type `[` to show flag tag suggestions ([LEAK], [FLOW], [STUCK], [GOLD], [DRIFT], [ANCHOR])
+     - Filters suggestions in real-time as user continues typing (e.g., `@d` shows only `@deep`)
+     - Navigate with ↑↓ arrow keys, select with Tab or Enter
+     - Sleek dropdown styled with lipgloss borders and highlighting
+     - Auto-dismisses when cursor moves away or Esc is pressed
+  3. **Enhanced Help Text:**
+     - Dynamic control hints show autocomplete instructions when dropdown is active
+     - Clear visual feedback for available actions
+- **Files Created:**
+  - `internal/tui/autocomplete.go` - Reusable autocomplete component with filtering and navigation
+- **Files Modified:**
+  - `internal/tui/log_entry.go` - Integrated autocomplete state and real-time conversion
+- **Technical Details:**
+  - Autocomplete tracks trigger position, filter text, and selected index
+  - Smart detection of trigger context (won't trigger inside brackets or after spaces)
+  - Tab key dedicated to autocomplete selection for seamless workflow
+  - Enter key submits entry normally, but selects suggestion if autocomplete is active
+- **Binary Size:** 9.6MB (unchanged)
+- **Status:** Live text transformations and autocomplete fully functional!
+
 ---
 
 ## Blockers & Issues
@@ -520,16 +636,6 @@
 ---
 
 ## Next Steps
-
-### Phase 4 (Essential Utilities)
-1. Implement arrow momentum input solution (`+`, `-`, `=`, `<` shortcuts)
-2. Add back arrow ← for waste/destructive momentum tracking
-3. Implement `log help` command with comprehensive documentation
-4. Remove @signoff from `log stats` tag distribution
-5. Implement `log edit` and `log edit <number>` commands
-6. Implement `log win` command for quick win logging
-7. Implement `log delete` and `log delete <number>` commands
-8. Implement `log thought` for quick lightweight thought logging
 
 ### Phase 5 (Historical Viewing)
 1. Implement `log yesterday` command

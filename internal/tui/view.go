@@ -2,9 +2,10 @@ package tui
 
 import (
 	"strings"
+	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/aaryareddy/log_cli/internal/database"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ViewModel is the model for viewing today's log entries
@@ -58,7 +59,11 @@ func (m ViewModel) View() string {
 		b.WriteString("\n\n")
 		b.WriteString(DimStyle.Render("Type: log"))
 	} else {
-		b.WriteString(formatEntries(m.entries))
+		// Split entries if day is completed
+		regularEntries, afterHoursEntries := splitEntries(m.entries, m.day.Completed)
+
+		// Display regular entries
+		b.WriteString(formatEntries(regularEntries))
 
 		// Show win if recorded
 		if m.day.Win != nil && *m.day.Win != "" {
@@ -91,12 +96,62 @@ func (m ViewModel) View() string {
 				b.WriteString(*m.day.TomorrowProtect)
 			}
 		}
+
+		// Show after-hours section if any entries
+		if len(afterHoursEntries) > 0 {
+			b.WriteString("\n\n")
+			b.WriteString(DimStyle.Render("═════════════════════════════════════"))
+			b.WriteString("\n")
+			b.WriteString(BoldStyle.Render("After-Hours"))
+			b.WriteString("\n")
+			b.WriteString(DimStyle.Render("═════════════════════════════════════"))
+			b.WriteString("\n\n")
+			b.WriteString(formatEntries(afterHoursEntries))
+		}
 	}
 
 	b.WriteString("\n\n")
 	b.WriteString(DimStyle.Render("Press any key to close"))
 
 	return BoxStyle.Render(b.String())
+}
+
+// splitEntries separates regular entries from after-hours entries
+// Returns regular entries and after-hours entries
+func splitEntries(entries []*database.Entry, dayCompleted bool) ([]*database.Entry, []*database.Entry) {
+	if !dayCompleted {
+		// If day not completed, all entries are regular
+		return entries, nil
+	}
+
+	// Find last @signoff entry timestamp
+	var signoffTime time.Time
+	for _, entry := range entries {
+		for _, tag := range entry.Tags {
+			if tag.TagValue == "@signoff" {
+				signoffTime = entry.Timestamp
+			}
+		}
+	}
+
+	if signoffTime.IsZero() {
+		// No signoff found (shouldn't happen if day.Completed is true, but handle it)
+		return entries, nil
+	}
+
+	// Split entries
+	var regular []*database.Entry
+	var afterHours []*database.Entry
+
+	for _, entry := range entries {
+		if entry.Timestamp.After(signoffTime) {
+			afterHours = append(afterHours, entry)
+		} else {
+			regular = append(regular, entry)
+		}
+	}
+
+	return regular, afterHours
 }
 
 // formatEntries formats the list of entries for display
@@ -141,6 +196,8 @@ func formatMomentum(momentum string) string {
 		return "↓"
 	case "neutral":
 		return "→"
+	case "back":
+		return "←"
 	default:
 		return ""
 	}

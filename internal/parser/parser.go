@@ -9,7 +9,10 @@ import (
 
 // ParseEntry parses an entry text and extracts momentum, tags, and clean text
 func ParseEntry(text string) (cleanText string, momentum *string, tags []database.Tag) {
-	// Extract momentum first
+	// Convert shortcuts to arrows first
+	text = convertMomentumShortcuts(text)
+
+	// Extract momentum
 	momentum, remaining := extractMomentum(text)
 
 	// Extract tags from remaining text
@@ -21,9 +24,31 @@ func ParseEntry(text string) (cleanText string, momentum *string, tags []databas
 	return cleanText, momentum, tags
 }
 
-// extractMomentum finds and extracts momentum markers (↑, ↓, →)
+// convertMomentumShortcuts converts text shortcuts to arrow symbols
+// Only converts double characters to preserve single characters for normal text use
+// Supports: ++ → ↑, -- → ↓, == → →, << → ←, also -> and <-
+func convertMomentumShortcuts(text string) string {
+	// Replace shortcuts with arrows (order matters - replace longer patterns first)
+	replacements := map[string]string{
+		"++": "↑",
+		"--": "↓",
+		"==": "→",
+		"<<": "←",
+		"->": "→",
+		"<-": "←",
+	}
+
+	// Apply all replacements
+	for shortcut, arrow := range replacements {
+		text = strings.ReplaceAll(text, shortcut, arrow)
+	}
+
+	return text
+}
+
+// extractMomentum finds and extracts momentum markers (↑, ↓, →, ←)
 func extractMomentum(text string) (momentum *string, remaining string) {
-	momentumRegex := regexp.MustCompile(`[↑↓→]`)
+	momentumRegex := regexp.MustCompile(`[↑↓→←]`)
 
 	match := momentumRegex.FindString(text)
 	if match != "" {
@@ -35,6 +60,8 @@ func extractMomentum(text string) (momentum *string, remaining string) {
 			m = "down"
 		case "→":
 			m = "neutral"
+		case "←":
+			m = "back"
 		}
 		momentum = &m
 
@@ -45,6 +72,35 @@ func extractMomentum(text string) (momentum *string, remaining string) {
 	}
 
 	return momentum, remaining
+}
+
+// ReconstructEntryText reconstructs the original entry text from parsed components
+// This is used for editing entries
+func ReconstructEntryText(cleanText string, momentum *string, tags []database.Tag) string {
+	var parts []string
+
+	parts = append(parts, cleanText)
+
+	// Add momentum marker
+	if momentum != nil {
+		switch *momentum {
+		case "up":
+			parts = append(parts, "↑")
+		case "down":
+			parts = append(parts, "↓")
+		case "neutral":
+			parts = append(parts, "→")
+		case "back":
+			parts = append(parts, "←")
+		}
+	}
+
+	// Add tags
+	for _, tag := range tags {
+		parts = append(parts, tag.TagValue)
+	}
+
+	return strings.Join(parts, " ")
 }
 
 // extractTags finds and extracts context tags (@word) and flag tags ([WORD])

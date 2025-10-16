@@ -20,6 +20,7 @@ type LogEntryModel struct {
 	height       int
 	submitted    bool
 	entryText    string
+	autocomplete AutocompleteState
 }
 
 // NewLogEntryModel creates a new log entry model
@@ -42,6 +43,7 @@ func NewLogEntryModel(lastLog time.Time, count int) LogEntryModel {
 		entryCount:   count,
 		isDriftAlert: isDrift,
 		submitted:    false,
+		autocomplete: NewAutocompleteState(),
 	}
 }
 
@@ -52,11 +54,49 @@ func (m LogEntryModel) Init() tea.Cmd {
 
 // Update handles messages
 func (m LogEntryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	previousValue := m.input.Value()
+
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
+		// Handle autocomplete navigation when active
+		if m.autocomplete.Active {
+			switch msg.Type {
+			case tea.KeyUp:
+				m.autocomplete.MoveUp()
+				return m, nil
+			case tea.KeyDown:
+				m.autocomplete.MoveDown()
+				return m, nil
+			case tea.KeyTab, tea.KeyEnter:
+				// If Enter and autocomplete has suggestions, insert suggestion
+				if msg.Type == tea.KeyEnter && m.autocomplete.GetSelectedSuggestion() != "" {
+					newText := m.autocomplete.InsertSuggestion(m.input.Value())
+					m.input.SetValue(newText)
+					m.autocomplete.Deactivate()
+					return m, nil
+				}
+				// If Tab, always insert suggestion if available
+				if msg.Type == tea.KeyTab {
+					suggestion := m.autocomplete.GetSelectedSuggestion()
+					if suggestion != "" {
+						newText := m.autocomplete.InsertSuggestion(m.input.Value())
+						m.input.SetValue(newText)
+						m.autocomplete.Deactivate()
+						return m, nil
+					}
+				}
+				// Fall through if Enter with no suggestion (submit entry)
+			case tea.KeyEsc:
+				m.autocomplete.Deactivate()
+				return m, nil
+			}
+		}
+
+		// Handle normal key presses
 		switch msg.Type {
 		case tea.KeyEnter:
-			// Submit entry
+			// Submit entry (only if not handled by autocomplete above)
 			if m.input.Value() != "" {
 				m.submitted = true
 				m.entryText = m.input.Value()
@@ -66,13 +106,38 @@ func (m LogEntryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case tea.KeyCtrlC, tea.KeyEsc:
 			return m, tea.Quit
 		}
+
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
 	}
 
-	var cmd tea.Cmd
+	// Update the input
 	m.input, cmd = m.input.Update(msg)
+
+	// If text changed, apply momentum conversion and update autocomplete
+	if m.input.Value() != previousValue {
+		newValue := m.input.Value()
+
+		// Apply real-time momentum marker conversion
+		newValue = convertMomentumMarkers(newValue)
+
+		// Update input if changed
+		if newValue != m.input.Value() {
+			cursorPos := m.input.Position()
+			m.input.SetValue(newValue)
+			// Adjust cursor position if needed (momentum markers change text length)
+			if cursorPos > len(newValue) {
+				m.input.SetCursor(len(newValue))
+			} else {
+				m.input.SetCursor(cursorPos)
+			}
+		}
+
+		// Update autocomplete state
+		m.autocomplete.Update(m.input.Value(), m.input.Position())
+	}
+
 	return m, cmd
 }
 
@@ -109,13 +174,31 @@ func (m LogEntryModel) View() string {
 
 	// Text input
 	b.WriteString(m.input.View())
+	b.WriteString("\n")
+
+	// Autocomplete dropdown (if active)
+	if m.autocomplete.Active && len(m.autocomplete.Suggestions) > 0 {
+		b.WriteString("\n")
+		b.WriteString(m.autocomplete.View())
+		b.WriteString("\n")
+	} else {
+		b.WriteString("\n")
+	}
+
+	// Helper text - show shortcuts for momentum
+	helperText := "Momentum: ++ -- == << (or -> <-) for ↑ ↓ → ←"
+	b.WriteString(DimStyle.Render(helperText))
+	b.WriteString("\n")
+	helperTags := "@deep @social @admin @break @zone | [LEAK] [FLOW] [STUCK] [GOLD]"
+	b.WriteString(DimStyle.Render(helperTags))
 	b.WriteString("\n\n")
 
-	// Helper text
-	helperText := "↑ ↓ → | @deep @social @admin @break @zone | [LEAK] [FLOW] [STUCK] [GOLD]"
-	b.WriteString(DimStyle.Render(helperText))
-	b.WriteString("\n\n")
-	b.WriteString(DimStyle.Render("Enter to submit • Ctrl+C to cancel"))
+	// Control hints - update to show Tab option when autocomplete is active
+	if m.autocomplete.Active {
+		b.WriteString(DimStyle.Render("↑↓ to navigate • Tab/Enter to select • Esc to close • Ctrl+C to cancel"))
+	} else {
+		b.WriteString(DimStyle.Render("Enter to submit • Ctrl+C to cancel"))
+	}
 
 	return BoxStyle.Render(b.String())
 }
@@ -138,4 +221,24 @@ func formatDuration(d time.Duration) string {
 		return fmt.Sprintf("%dh %dm", hours, mins)
 	}
 	return fmt.Sprintf("%dm", mins)
+}
+
+// convertMomentumMarkers converts momentum shortcuts to arrow symbols in real-time
+func convertMomentumMarkers(text string) string {
+	// Replace shortcuts with arrows
+	// Order matters - replace longer patterns first to avoid partial replacements
+	replacements := []struct{ old, new string }{
+		{"++", "↑"},
+		{"--", "↓"},
+		{"==", "→"},
+		{"<<", "←"},
+		{"->", "→"},
+		{"<-", "←"},
+	}
+
+	for _, r := range replacements {
+		text = strings.ReplaceAll(text, r.old, r.new)
+	}
+
+	return text
 }

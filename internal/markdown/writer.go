@@ -5,6 +5,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/aaryareddy/log_cli/internal/database"
 )
@@ -37,6 +38,31 @@ func NewWriter(outputDir string) (*Writer, error) {
 func (w *Writer) AppendEntry(day *database.Day, entry *database.Entry) error {
 	filename := filepath.Join(w.outputDir, day.Date.Format("2006-01-02")+".md")
 
+	// If day is completed (after-hours logging), handle specially
+	if day.Completed {
+		// Read existing file
+		existingContent, err := os.ReadFile(filename)
+		if err != nil {
+			return fmt.Errorf("failed to read markdown file: %w", err)
+		}
+
+		content := string(existingContent)
+		entryLine := w.formatEntry(entry)
+
+		// Check if after-hours section exists
+		if strings.Contains(content, "**After-Hours:**") {
+			// Append to existing after-hours section
+			content = strings.TrimRight(content, "\n") + "\n" + entryLine + "\n"
+		} else {
+			// Create new after-hours section
+			content = strings.TrimRight(content, "\n") + "\n\n---\n\n**After-Hours:**\n" + entryLine + "\n"
+		}
+
+		// Write back complete file
+		return os.WriteFile(filename, []byte(content), 0644)
+	}
+
+	// Normal append logic for non-completed days
 	// Check if file exists
 	_, err := os.Stat(filename)
 	fileExists := !os.IsNotExist(err)
@@ -104,6 +130,8 @@ func (w *Writer) formatEntry(entry *database.Entry) string {
 			line.WriteString(" ↓")
 		case "neutral":
 			line.WriteString(" →")
+		case "back":
+			line.WriteString(" ←")
 		}
 	}
 
@@ -113,6 +141,12 @@ func (w *Writer) formatEntry(entry *database.Entry) string {
 	}
 
 	return line.String()
+}
+
+// RegenerateFullDay completely regenerates a day's markdown file from database entries
+// Used after editing or deleting entries to ensure markdown matches database
+func (w *Writer) RegenerateFullDay(day *database.Day, entries []*database.Entry) error {
+	return w.GenerateCompleteDaylog(day, entries)
 }
 
 // GenerateCompleteDaylog generates a complete daylog with sign-off reflections
@@ -132,8 +166,31 @@ func (w *Writer) GenerateCompleteDaylog(day *database.Day, entries []*database.E
 
 	content.WriteString("---\n\n")
 
-	// All entries
+	// Separate regular entries from after-hours entries
+	// Find the last @signoff entry timestamp
+	var signoffTime time.Time
 	for _, entry := range entries {
+		for _, tag := range entry.Tags {
+			if tag.TagValue == "@signoff" {
+				signoffTime = entry.Timestamp
+			}
+		}
+	}
+
+	// Split entries into regular and after-hours
+	var regularEntries []*database.Entry
+	var afterHoursEntries []*database.Entry
+
+	for _, entry := range entries {
+		if !signoffTime.IsZero() && entry.Timestamp.After(signoffTime) {
+			afterHoursEntries = append(afterHoursEntries, entry)
+		} else {
+			regularEntries = append(regularEntries, entry)
+		}
+	}
+
+	// Write regular entries (before sign-off)
+	for _, entry := range regularEntries {
 		content.WriteString(w.formatEntry(entry) + "\n")
 	}
 
@@ -154,6 +211,14 @@ func (w *Writer) GenerateCompleteDaylog(day *database.Day, entries []*database.E
 		}
 		if day.TomorrowProtect != nil && *day.TomorrowProtect != "" {
 			content.WriteString(fmt.Sprintf("- Tomorrow protect: %s\n", *day.TomorrowProtect))
+		}
+	}
+
+	// After-hours section if any entries logged after sign-off
+	if len(afterHoursEntries) > 0 {
+		content.WriteString("\n---\n\n**After-Hours:**\n")
+		for _, entry := range afterHoursEntries {
+			content.WriteString(w.formatEntry(entry) + "\n")
 		}
 	}
 

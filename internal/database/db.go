@@ -228,6 +228,92 @@ func (s *Store) CompleteDaySignoff(dayID int, pulledOff, keptOn, protect string)
 	return nil
 }
 
+// GetEntryByIndex retrieves an entry by its index within the day (1-indexed)
+func (s *Store) GetEntryByIndex(dayID int, index int) (*Entry, error) {
+	// Get all entries for the day
+	entries, err := s.GetTodayEntries(dayID)
+	if err != nil {
+		return nil, err
+	}
+
+	// Check bounds (1-indexed)
+	if index < 1 || index > len(entries) {
+		return nil, fmt.Errorf("invalid entry index: %d (valid range: 1-%d)", index, len(entries))
+	}
+
+	// Return entry (convert to 0-indexed)
+	return entries[index-1], nil
+}
+
+// UpdateEntry updates an existing entry's text, momentum, and tags
+func (s *Store) UpdateEntry(entry *Entry) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Update entry
+	_, err = tx.Exec(`
+		UPDATE entries
+		SET entry_text = ?, momentum = ?
+		WHERE id = ?
+	`, entry.EntryText, entry.Momentum, entry.ID)
+	if err != nil {
+		return fmt.Errorf("failed to update entry: %w", err)
+	}
+
+	// Delete existing tags
+	_, err = tx.Exec(`DELETE FROM tags WHERE entry_id = ?`, entry.ID)
+	if err != nil {
+		return fmt.Errorf("failed to delete old tags: %w", err)
+	}
+
+	// Insert new tags
+	for _, tag := range entry.Tags {
+		_, err := tx.Exec(`
+			INSERT INTO tags (entry_id, tag_type, tag_value)
+			VALUES (?, ?, ?)
+		`, entry.ID, tag.TagType, tag.TagValue)
+		if err != nil {
+			return fmt.Errorf("failed to insert tag: %w", err)
+		}
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
+// DeleteEntry deletes an entry and its associated tags
+func (s *Store) DeleteEntry(entryID int) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("failed to begin transaction: %w", err)
+	}
+	defer tx.Rollback()
+
+	// Delete tags first (foreign key constraint)
+	_, err = tx.Exec(`DELETE FROM tags WHERE entry_id = ?`, entryID)
+	if err != nil {
+		return fmt.Errorf("failed to delete tags: %w", err)
+	}
+
+	// Delete entry
+	_, err = tx.Exec(`DELETE FROM entries WHERE id = ?`, entryID)
+	if err != nil {
+		return fmt.Errorf("failed to delete entry: %w", err)
+	}
+
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("failed to commit transaction: %w", err)
+	}
+
+	return nil
+}
+
 // GetWeeklyStats calculates statistics for the past 7 days
 func (s *Store) GetWeeklyStats() (*WeeklyStats, error) {
 	weekAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
@@ -243,13 +329,13 @@ func (s *Store) GetWeeklyStats() (*WeeklyStats, error) {
 		return nil, fmt.Errorf("failed to count entries: %w", err)
 	}
 
-	// Tag distribution
+	// Tag distribution (exclude @signoff from stats)
 	rows, err := s.db.Query(`
 		SELECT t.tag_value, COUNT(*) as count
 		FROM tags t
 		JOIN entries e ON t.entry_id = e.id
 		JOIN days d ON e.day_id = d.id
-		WHERE d.date >= ? AND t.tag_type = 'context'
+		WHERE d.date >= ? AND t.tag_type = 'context' AND t.tag_value != '@signoff'
 		GROUP BY t.tag_value
 	`, weekAgo)
 	if err != nil {

@@ -5,8 +5,8 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/aaryareddy/log_cli/internal/database"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ConfettiModel shows an animated celebration for day completion

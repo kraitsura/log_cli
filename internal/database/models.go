@@ -41,6 +41,7 @@ const (
 	MomentumUp      Momentum = "up"
 	MomentumNeutral Momentum = "neutral"
 	MomentumDown    Momentum = "down"
+	MomentumBack    Momentum = "back" // Waste/destructive action
 )
 
 // Context tags

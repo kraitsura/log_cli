@@ -6,8 +6,9 @@
 
 ## Current Status
 
-**Phase:** Phase 2 - Smart Features ✓ COMPLETE
-**Last Updated:** 2025-10-15 (Entry parsing, markdown generation, and smart prompts working!)
+**Phase:** Phase 3 - Viewing & Stats ✓ COMPLETE
+**Last Updated:** 2025-10-15 (All viewing, stats, sign-off, and confetti features working!)
+**Roadmap Updated:** 2025-10-15 (Phases 4-10 restructured; Phase 4 split into Essential Utilities with arrow input, edit, win, delete, thought commands)
 
 ---
 
@@ -124,42 +125,301 @@
 
 ---
 
-## Phase 3: Viewing & Stats (Planned)
+## Phase 3: Viewing & Stats ✓ COMPLETE
 
 **Goal:** Enable users to view logs and see statistics.
 
-- [ ] `log view` - Display today's log
-- [ ] `log yesterday` - Display previous day
-- [ ] `log stats` - Weekly statistics
-  - [ ] Total entries
-  - [ ] Tag distribution
-  - [ ] Momentum patterns
-- [ ] `log week` - Weekly review with patterns
+### Commands ✓
+- [x] `log view` - Display today's log - 2025-10-15
+- [x] `log stats` - Weekly statistics - 2025-10-15
+  - [x] Total entries - 2025-10-15
+  - [x] Tag distribution with ASCII bar charts - 2025-10-15
+  - [x] Average logs per day - 2025-10-15
+- [ ] `log yesterday` - Display previous day (Deferred to Phase 4)
+- [ ] `log week` - Weekly review with patterns (Deferred to Phase 4)
+
+### Sign-off Flow ✓
+- [x] Detect @signoff tag - 2025-10-15
+- [x] Sign-off question screen - 2025-10-15
+- [x] Generate complete markdown with reflections - 2025-10-15
+- [x] Confetti animation on completion - 2025-10-15
+
+### Files Created ✓
+- [x] `internal/tui/view.go` - Read-only view of today's entries - 2025-10-15
+- [x] `internal/tui/signoff.go` - 3-question reflection screen - 2025-10-15
+- [x] `internal/tui/confetti.go` - Animated celebration screen - 2025-10-15
+- [x] `internal/analytics/stats.go` - Stats formatting and bar charts - 2025-10-15
+- [x] Updated `cmd/log/main.go` - Command routing and sign-off flow - 2025-10-15
 
 ---
 
-## Phase 4: Intelligence (Planned)
+## Phase 4: Essential Utilities & Commands (Planned)
 
-**Goal:** Pattern recognition and insights.
+**Goal:** Add essential utility commands for daily use and improve input experience.
+
+### Arrow Momentum Input Solution
+- [ ] Implement text shortcut system for momentum markers
+  - [ ] `++` or `+` → ↑ (productive/energized)
+  - [ ] `--` or `-` → ↓ (dragging/unfocused)
+  - [ ] `->` or `=` → → (neutral/coasting)
+  - [ ] `<-` or `<` → ← (waste/destructive) **NEW MARKER**
+- [ ] Add back arrow ← as fourth momentum marker
+  - [ ] Update database models to support ← momentum
+  - [ ] Update parser to recognize ← marker
+  - [ ] Display as "waste of time" or "destructive action" in stats
+  - [ ] Add to help documentation
+- [ ] Update TUI to show shortcut hints
+  - [ ] Display: "+ - = < for ↑ ↓ → ←" in entry screen
+- [ ] Auto-convert shortcuts to arrows on display
+
+### Help Command
+- [ ] `log help` - Display comprehensive help information
+  - [ ] Show all available commands
+  - [ ] Display tag reference (@deep, @social, @admin, @break, @zone, @signoff)
+  - [ ] Display flag reference ([LEAK], [FLOW], [STUCK], [GOLD], [DRIFT], [ANCHOR])
+  - [ ] Show momentum markers (↑, ↓, →, ←) with shortcuts
+  - [ ] Usage examples
+  - [ ] Quick start guide
+
+### Stats Improvements
+- [ ] Remove @signoff from tag distribution in `log stats`
+  - [ ] Filter out @signoff entries from tag counting
+  - [ ] Update analytics to ignore sign-off tags in percentages
+- [ ] Add ← (waste/destructive) momentum tracking to stats
+  - [ ] Show count of ← entries
+  - [ ] Display as warning/awareness metric
+
+### Log Editing
+- [ ] `log edit` - Edit most recent entry
+  - [ ] Fetch last entry from database
+  - [ ] Open TUI with pre-filled text
+  - [ ] Allow full text editing with tags/momentum
+  - [ ] Update database and regenerate markdown file
+- [ ] `log edit <number>` - Edit specific entry by index
+  - [ ] Accept entry number (1 = first entry of day, 2 = second, etc.)
+  - [ ] Display which entry is being edited
+  - [ ] Fetch and pre-fill entry text
+  - [ ] Update database and markdown on save
+  - [ ] Handle invalid entry numbers gracefully
+
+### Log Win Command
+- [ ] `log win` - Quickly log a win without waiting for 10-entry prompt
+  - [ ] Open simple TUI with "Win:" prefix
+  - [ ] Save win to current day
+  - [ ] Append to markdown with 🌟 emoji
+  - [ ] Can be called multiple times per day
+  - [ ] Display in `log view` with special formatting
+
+### Log Deletion
+- [ ] `log delete` - Delete most recent entry
+  - [ ] Show confirmation prompt with entry text
+  - [ ] Delete from database
+  - [ ] Regenerate markdown file without deleted entry
+- [ ] `log delete <number>` - Delete specific entry by index
+  - [ ] Display entry text for confirmation
+  - [ ] Delete from both database and markdown file
+  - [ ] Handle edge cases (no entries, invalid selection)
+
+### Log Thought Feature
+- [ ] `log thought` - Quick thought logging without full context
+  - [ ] Create simple TUI for thought entry
+  - [ ] No tags, momentum, or metadata required
+  - [ ] Store as special entry type in database
+  - [ ] Append to markdown with "💭 Thought:" prefix
+  - [ ] Display differently in `log view`
+  - [ ] Keep it lightweight and fast
+
+---
+
+## Phase 5: Historical Viewing & Navigation (Planned)
+
+**Goal:** Enable users to view and navigate past logs.
+
+### Historical Viewing
+- [ ] `log yesterday` - Display previous day's complete log
+  - [ ] Read from previous day's markdown file
+  - [ ] Display with same formatting as `log view`
+  - [ ] Show day's intention, entries, win, and reflections
+- [ ] `log week` - Weekly review with pattern analysis
+  - [ ] Group and display [LEAK] patterns with descriptions
+  - [ ] Group and display [FLOW] patterns with timestamps
+  - [ ] Group and display [STUCK] patterns with contexts
+  - [ ] Group and display [GOLD] patterns with time ranges
+  - [ ] Show momentum distribution across week
+  - [ ] Highlight ← (waste) patterns for awareness
+- [ ] Date range navigation
+  - [ ] `log view <date>` - View specific date (e.g., `log view 2025-10-14`)
+  - [ ] Support relative dates (e.g., `log view -2` for 2 days ago)
+
+### Markdown Parsing
+- [ ] Markdown file parsing for historical data
+  - [ ] Create parser to rebuild database from markdown files
+  - [ ] Handle recovery from corrupted database
+  - [ ] Import historical logs from markdown
+
+---
+
+## Phase 6: Intelligence & Awareness Features (Planned)
+
+**Goal:** Add smart prompts and awareness features to improve user behavior.
+
+### Anchor Point Suggestions
+- [ ] Detect first log after 12:00pm
+- [ ] Prepopulate `[ANCHOR - MIDDAY]` tag suggestion
+- [ ] Detect first log after 6:00pm
+- [ ] Prepopulate `[ANCHOR - EVENING]` tag suggestion
+- [ ] Allow user to delete or keep suggestions
+
+### Redirect Prompts
+- [ ] Detect distraction keywords (scrolling, browsing, checking, wandering)
+- [ ] Display redirect prompt: "What would On-Track You do right now?"
+- [ ] Non-judgmental awareness message
+- [ ] Press Enter to dismiss
+
+### Energy Pattern Recognition
+- [ ] Track ↑ momentum entries over 2+ weeks
+- [ ] Identify time ranges with most ↑ entries
+- [ ] Display pattern insights: "You log ↑ most often between 9-11am"
+
+### Daily Rituals
+- [ ] Display "The Honesty Pact" on first log each day
+- [ ] Commitment message: "I commit to honest entries today."
+
+### Time Bookends
+- [ ] Detect "Start:" and "Done:" entry pairs
+- [ ] Calculate actual time spent on tasks
+- [ ] Compare perceived vs actual time
+- [ ] Display insights on time estimation
+
+---
+
+## Phase 7: Advanced Analytics (Planned)
+
+**Goal:** Deep pattern analysis and actionable insights.
 
 - [ ] Flag grouping analysis
-- [ ] Energy pattern recognition
-- [ ] Redirect prompts for distraction keywords
-- [ ] Anchor point optimization
+  - [ ] Identify what activities trigger [LEAK] patterns
+  - [ ] Identify what activities trigger [FLOW] patterns
+  - [ ] Identify what activities trigger [STUCK] patterns
+- [ ] Context tag correlation
+  - [ ] Which tags correlate with high productivity (↑)
+  - [ ] Which tags correlate with low energy (↓)
+- [ ] Optimal work time identification
+  - [ ] Best times for @deep work based on flow states
+  - [ ] Best times for @admin tasks
+- [ ] Weekly insights generation
+  - [ ] Productivity trends
+  - [ ] Distraction patterns
+  - [ ] Momentum trends
 
 ---
 
-## Phase 5: Polish (Planned)
+## Phase 8: Extended Commands (Planned)
 
-**Goal:** Refinement and user experience improvements.
+**Goal:** Add utility commands for search, export, and tracking.
 
-- [ ] Confetti animation
-- [ ] Glamour rendering for markdown display
-- [ ] Enhanced styling with Lip Gloss
-- [ ] Comprehensive error handling
+### Search & Export
+- [ ] `log search [keyword]` - Find past entries containing keyword
+  - [ ] Search across all markdown files
+  - [ ] Display results with date and context
+- [ ] `log export` - Export week/month as formatted document
+  - [ ] Generate comprehensive weekly report
+  - [ ] Generate monthly summary
+  - [ ] Export to PDF or markdown
+
+### Tracking & Insights
+- [ ] `log streaks` - Track consecutive days of logging
+  - [ ] Display current streak
+  - [ ] Display longest streak
+  - [ ] Celebrate milestones
+- [ ] `log insights` - AI-generated patterns and suggestions
+  - [ ] Weekly pattern summary
+  - [ ] Personalized recommendations
+  - [ ] Productivity optimization tips
+
+### Edge Case Handling
+- [ ] Late night logging (after midnight)
+  - [ ] Prompt: "Log this as part of today or start of tomorrow?"
+  - [ ] Allow user to choose date
+- [ ] Empty log entry handling
+  - [ ] Display friendly message: "Can't log emptiness! What are you actually doing? 😊"
+- [ ] Multiple sign-offs handling
+  - [ ] Only last @signoff triggers full ritual
+- [ ] No logs today handling
+  - [ ] Display helpful prompt for `log view` and `log stats`
+
+---
+
+## Phase 9: Customization & Configuration (Planned)
+
+**Goal:** Allow user customization and improve visual presentation.
+
+### Configuration
 - [ ] Config file support (~/.daylog/config.yaml)
+  - [ ] Custom markdown output directory
+  - [ ] Custom database location
+  - [ ] Drift alert threshold (default: 90 minutes)
+  - [ ] Enable/disable features
+- [ ] Custom user-defined tags
+  - [ ] Allow users to add their own @ tags
+  - [ ] Allow users to add their own [ ] flags
+
+### Visual Enhancements
+- [ ] Dark/light theme toggle
+  - [ ] Detect system theme preference
+  - [ ] Manual override in config
+- [ ] Glamour rendering for markdown display
+  - [ ] Render `log view` with Glamour
+  - [ ] Render `log week` with Glamour
+- [ ] Enhanced styling with Lip Gloss
+  - [ ] Consistent color scheme
+  - [ ] Improved box borders and spacing
+  - [ ] Better typography
+- [ ] Optional sound effects toggle
+  - [ ] Confetti celebration sound
+  - [ ] Entry logged confirmation sound
+
+---
+
+## Phase 10: Polish & Distribution (Planned)
+
+**Goal:** Production-ready distribution and deployment.
+
+### Code Quality
+- [ ] Comprehensive error handling
+  - [ ] Database connection errors
+  - [ ] File system errors
+  - [ ] Invalid input handling
+- [ ] Input validation and sanitization
+- [ ] Performance optimization
+  - [ ] Database query optimization
+  - [ ] Large file handling
+- [ ] Comprehensive test coverage
+  - [ ] Unit tests for all packages
+  - [ ] Integration tests for flows
+  - [ ] TUI component tests
+
+### Distribution
 - [ ] Installation script
+  - [ ] One-command install
+  - [ ] Automatic PATH configuration
+  - [ ] Database initialization
 - [ ] Homebrew formula
+  - [ ] Create tap repository
+  - [ ] Submit to Homebrew core
+- [ ] Release automation
+  - [ ] GitHub Actions CI/CD
+  - [ ] Multi-platform builds (macOS, Linux, Windows)
+  - [ ] Automated releases
+
+### Optional Integrations
+- [ ] Calendar integration
+  - [ ] Correlate logs with calendar meetings
+  - [ ] Auto-tag @social for meeting times
+- [ ] Export to external tools
+  - [ ] Notion integration
+  - [ ] Obsidian compatibility
+  - [ ] Google Calendar sync
 
 ---
 
@@ -194,6 +454,63 @@
 - **Deferred:** Sign-off ritual and anchor suggestions moved to Phase 3
 - **Status:** Ready for end-to-end testing with real logging workflow
 
+### 2025-10-15: Phase 3 Complete
+- **Milestone:** Viewing, stats, and sign-off complete!
+- **Achievement:** Full daily ritual implemented from intention to confetti
+- **Features Delivered:**
+  - Command routing system for subcommands (view, stats)
+  - `log view` - Beautiful display of today's entries
+  - `log stats` - Weekly statistics with ASCII bar charts
+  - Complete sign-off flow with 3 reflection questions
+  - Confetti animation on day completion
+  - Complete daylog markdown generation with reflections
+- **Files Created:**
+  - `internal/tui/view.go` - Entry viewing screen
+  - `internal/tui/signoff.go` - Reflection questions screen
+  - `internal/tui/confetti.go` - Animated celebration
+  - `internal/analytics/stats.go` - Statistics formatting
+- **Database Integration:** CompleteDaySignoff already existed, seamlessly integrated
+- **Binary Size:** 9.6MB (unchanged from Phase 2)
+- **Status:** Core daily ritual complete! Ready for real-world testing
+
+### 2025-10-15: Roadmap Restructure (Phases 4-10)
+- **Decision:** Reorganized remaining development into 7 comprehensive phases
+- **Reason:** System spec contains many features not yet covered in original plan
+- **Initial Phase Breakdown:**
+  - Phase 4: Historical Viewing & Navigation (yesterday, week commands)
+  - Phase 5: Intelligence & Awareness (anchors, redirects, energy patterns, honesty pact, time bookends)
+  - Phase 6: Advanced Analytics (flag grouping, tag correlation, insights)
+  - Phase 7: Extended Commands (search, export, streaks, insights, edge cases)
+  - Phase 8: Customization & Configuration (config file, custom tags, themes, glamour)
+  - Phase 9: Polish & Distribution (error handling, installation, homebrew, CI/CD)
+- **Impact:** Clear roadmap covering all system spec features with ~70+ specific tasks
+- **Note:** Later reorganized - see "Phase 4 Split & Enhanced" decision below
+
+### 2025-10-15: Phase 4 Split & Enhanced with Utilities
+- **Decision:** Split original Phase 4 into two phases and added essential utility commands
+- **New Phase Structure:**
+  - **Phase 4: Essential Utilities & Commands** - Daily-use utilities (help, edit, win, delete, thought)
+  - **Phase 5: Historical Viewing & Navigation** - Past log viewing (yesterday, week, date navigation)
+  - Shifted all subsequent phases down by one number (old Phase 5 → Phase 6, etc.)
+- **Added Features:**
+  - Arrow momentum input solution: `+` `-` `=` `<` shortcuts for ↑ ↓ → ←
+  - **NEW:** Back arrow ← momentum marker for waste/destructive actions
+  - `log help` - Comprehensive help system with all tags, flags, and examples
+  - `log edit` / `log edit <number>` - Edit recent or specific entries
+  - `log win` - Quick win logging without waiting for 10-entry prompt
+  - `log delete` / `log delete <number>` - Delete recent or specific entries
+  - `log thought` - Quick lightweight thought logging without metadata
+  - Stats improvement - Remove @signoff from tag distribution
+- **Reason:**
+  - Arrow input was critical missing feature (no way to type ↑ ↓ → without mapping arrow keys)
+  - Edit/win/delete are high-frequency daily utilities needed before historical viewing
+  - Back arrow ← adds important awareness dimension for destructive behaviors
+- **Impact:**
+  - Phase 4 now has 8 major feature groups focused on daily workflow
+  - Clearer separation between immediate utilities (Phase 4) and historical analysis (Phase 5)
+  - Total phases increased from 9 to 10
+- **Status:** Phase 4 ready for implementation with comprehensive utility suite
+
 ---
 
 ## Blockers & Issues
@@ -202,15 +519,66 @@
 
 ---
 
-## Next Steps (Phase 3)
+## Next Steps
 
-1. Manual testing of Phase 2 features in real terminal
-2. Implement `log view` command to display today's entries
-3. Implement `log stats` command for weekly statistics
-4. Create sign-off flow with reflection questions
-5. Add confetti animation for day completion
-6. Test markdown file generation across multiple days
-7. Fix any bugs discovered during real-world usage
+### Immediate (Manual Testing)
+1. **Test Phase 3 features** in real terminal
+   - Run `./log` for basic logging with intention and win prompts
+   - Run `./log view` to see today's entries
+   - Run `./log stats` to see weekly statistics
+   - Log entry with `@signoff` tag to test complete sign-off flow and confetti
+
+### Phase 4 (Essential Utilities)
+1. Implement arrow momentum input solution (`+`, `-`, `=`, `<` shortcuts)
+2. Add back arrow ← for waste/destructive momentum tracking
+3. Implement `log help` command with comprehensive documentation
+4. Remove @signoff from `log stats` tag distribution
+5. Implement `log edit` and `log edit <number>` commands
+6. Implement `log win` command for quick win logging
+7. Implement `log delete` and `log delete <number>` commands
+8. Implement `log thought` for quick lightweight thought logging
+
+### Phase 5 (Historical Viewing)
+1. Implement `log yesterday` command
+2. Implement `log week` with pattern grouping
+3. Add date navigation (`log view <date>`)
+4. Create markdown parser for historical data recovery
+
+### Phase 6 (Intelligence & Awareness)
+1. Add anchor point suggestions (midday/evening)
+2. Implement redirect prompts for distraction keywords
+3. Add energy pattern recognition after 2 weeks of data
+4. Display "The Honesty Pact" on first daily log
+5. Implement time bookends tracking (Start/Done analysis)
+
+### Phase 7 (Advanced Analytics)
+1. Build flag grouping analysis engine
+2. Implement context tag correlation
+3. Create optimal work time identification
+4. Generate weekly insights and trends
+
+### Phase 8 (Extended Commands)
+1. Implement `log search` command
+2. Implement `log export` command
+3. Implement `log streaks` tracking
+4. Add `log insights` AI-powered suggestions
+5. Handle all edge cases (late night, empty entries, etc.)
+
+### Phase 9 (Customization)
+1. Create config file system (~/.daylog/config.yaml)
+2. Add custom tag definitions
+3. Implement theme toggle (dark/light)
+4. Integrate Glamour for markdown rendering
+5. Add optional sound effects
+
+### Phase 10 (Production Release)
+1. Comprehensive error handling and validation
+2. Performance optimization
+3. Full test coverage
+4. Create installation script
+5. Build Homebrew formula
+6. Set up CI/CD pipeline
+7. Multi-platform builds
 
 ---
 

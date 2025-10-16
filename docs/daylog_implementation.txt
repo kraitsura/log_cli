@@ -1,0 +1,1803 @@
+# DAYLOG Implementation Guide
+**Go + Bubble Tea + SQLite Architecture**
+
+## Technology Stack
+
+### Core
+- **Language:** Go 1.21+
+- **Database:** SQLite (modernc.org/sqlite - pure Go, no CGo)
+- **TUI Framework:** Bubble Tea (github.com/charmbracelet/bubbletea)
+
+### Supporting Libraries
+- **Bubbles** - Pre-built TUI components (text input, viewport)
+- **Lip Gloss** - Styling and layout
+- **Glamour** - Markdown rendering for display
+- **go-sqlite3** or **modernc.org/sqlite** - Database driver
+
+---
+
+## Project Structure
+
+```
+daylog/
+├── cmd/
+│   └── log/
+│       └── main.go                 # CLI entry point
+├── internal/
+│   ├── app/
+│   │   └── app.go                  # Application coordinator
+│   ├── database/
+│   │   ├── db.go                   # Database interface
+│   │   ├── schema.go               # Schema definitions
+│   │   ├── migrations.go           # Schema migrations
+│   │   ├── queries.go              # SQL query builders
+│   │   └── models.go               # Data models
+│   ├── markdown/
+│   │   ├── writer.go               # Generate .md from entries
+│   │   ├── parser.go               # Parse .md to entries (recovery)
+│   │   └── formatter.go            # Format helpers
+│   ├── tui/
+│   │   ├── log_entry.go            # Main log entry screen
+│   │   ├── intention.go            # Morning intention screen
+│   │   ├── signoff.go              # End-of-day sign-off
+│   │   ├── view.go                 # View existing logs
+│   │   ├── confetti.go             # Confetti animation
+│   │   └── styles.go               # Lip Gloss style definitions
+│   ├── analytics/
+│   │   ├── patterns.go             # Pattern detection
+│   │   ├── stats.go                # Statistics calculations
+│   │   └── insights.go             # Smart suggestions
+│   └── config/
+│       └── config.go               # App configuration
+├── daylogs/                        # Generated markdown files
+│   └── .gitkeep
+├── go.mod
+├── go.sum
+├── README.md
+└── .gitignore
+```
+
+---
+
+## Database Schema
+
+### SQLite Tables
+
+```sql
+-- Core entries table
+CREATE TABLE entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    day_id INTEGER NOT NULL,
+    timestamp DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    entry_text TEXT NOT NULL,
+    momentum TEXT CHECK(momentum IN ('up', 'neutral', 'down')),
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (day_id) REFERENCES days(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_entries_day ON entries(day_id);
+CREATE INDEX idx_entries_timestamp ON entries(timestamp);
+
+-- Days metadata table
+CREATE TABLE days (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date DATE UNIQUE NOT NULL,
+    intention TEXT,
+    win TEXT,
+    pulled_off_track TEXT,
+    kept_on_track TEXT,
+    tomorrow_protect TEXT,
+    completed BOOLEAN DEFAULT 0,
+    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_days_date ON days(date);
+
+-- Tags table (normalized)
+CREATE TABLE tags (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entry_id INTEGER NOT NULL,
+    tag_type TEXT NOT NULL CHECK(tag_type IN ('context', 'flag')),
+    tag_value TEXT NOT NULL,
+    FOREIGN KEY (entry_id) REFERENCES entries(id) ON DELETE CASCADE
+);
+
+CREATE INDEX idx_tags_entry ON tags(entry_id);
+CREATE INDEX idx_tags_type_value ON tags(tag_type, tag_value);
+
+-- Pre-computed patterns for faster queries
+CREATE TABLE pattern_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date DATE NOT NULL,
+    pattern_type TEXT NOT NULL,
+    pattern_value TEXT NOT NULL,
+    count INTEGER DEFAULT 1,
+    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX idx_pattern_date ON pattern_cache(date);
+
+-- User preferences/config
+CREATE TABLE config (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
+```
+
+---
+
+## Data Models
+
+```go
+// internal/database/models.go
+
+package database
+
+import "time"
+
+type Day struct {
+    ID              int       `db:"id"`
+    Date            time.Time `db:"date"`
+    Intention       *string   `db:"intention"`
+    Win             *string   `db:"win"`
+    PulledOffTrack  *string   `db:"pulled_off_track"`
+    KeptOnTrack     *string   `db:"kept_on_track"`
+    TomorrowProtect *string   `db:"tomorrow_protect"`
+    Completed       bool      `db:"completed"`
+    CreatedAt       time.Time `db:"created_at"`
+}
+
+type Entry struct {
+    ID        int       `db:"id"`
+    DayID     int       `db:"day_id"`
+    Timestamp time.Time `db:"timestamp"`
+    EntryText string    `db:"entry_text"`
+    Momentum  *string   `db:"momentum"` // "up", "neutral", "down"
+    CreatedAt time.Time `db:"created_at"`
+    Tags      []Tag     `db:"-"` // Loaded separately
+}
+
+type Tag struct {
+    ID       int    `db:"id"`
+    EntryID  int    `db:"entry_id"`
+    TagType  string `db:"tag_type"`  // "context" or "flag"
+    TagValue string `db:"tag_value"` // e.g., "deep", "LEAK", "FLOW"
+}
+
+type Momentum string
+
+const (
+    MomentumUp      Momentum = "up"
+    MomentumNeutral Momentum = "neutral"
+    MomentumDown    Momentum = "down"
+)
+
+type ContextTag string
+
+const (
+    TagDeep    ContextTag = "@deep"
+    TagSocial  ContextTag = "@social"
+    TagAdmin   ContextTag = "@admin"
+    TagBreak   ContextTag = "@break"
+    TagZone    ContextTag = "@zone"
+    TagSignoff ContextTag = "@signoff"
+)
+
+type FlagTag string
+
+const (
+    FlagLeak   FlagTag = "[LEAK]"
+    FlagFlow   FlagTag = "[FLOW]"
+    FlagStuck  FlagTag = "[STUCK]"
+    FlagGold   FlagTag = "[GOLD]"
+    FlagDrift  FlagTag = "[DRIFT]"
+    FlagAnchor FlagTag = "[ANCHOR]"
+)
+```
+
+---
+
+## Database Operations
+
+```go
+// internal/database/db.go
+
+package database
+
+import (
+    "database/sql"
+    "time"
+    _ "modernc.org/sqlite"
+)
+
+type Store struct {
+    db *sql.DB
+}
+
+func NewStore(dbPath string) (*Store, error) {
+    db, err := sql.Open("sqlite", dbPath)
+    if err != nil {
+        return nil, err
+    }
+    
+    if err := db.Ping(); err != nil {
+        return nil, err
+    }
+    
+    store := &Store{db: db}
+    
+    // Run migrations
+    if err := store.migrate(); err != nil {
+        return nil, err
+    }
+    
+    return store, nil
+}
+
+// GetOrCreateToday gets today's day record or creates it
+func (s *Store) GetOrCreateToday() (*Day, error) {
+    today := time.Now().Format("2006-01-02")
+    
+    var day Day
+    err := s.db.QueryRow(`
+        SELECT id, date, intention, win, pulled_off_track, 
+               kept_on_track, tomorrow_protect, completed, created_at
+        FROM days WHERE date = ?
+    `, today).Scan(&day.ID, &day.Date, &day.Intention, &day.Win,
+        &day.PulledOffTrack, &day.KeptOnTrack, &day.TomorrowProtect,
+        &day.Completed, &day.CreatedAt)
+    
+    if err == sql.ErrNoRows {
+        // Create new day
+        result, err := s.db.Exec(`
+            INSERT INTO days (date) VALUES (?)
+        `, today)
+        if err != nil {
+            return nil, err
+        }
+        
+        id, _ := result.LastInsertId()
+        day.ID = int(id)
+        day.Date, _ = time.Parse("2006-01-02", today)
+        return &day, nil
+    }
+    
+    return &day, err
+}
+
+// InsertEntry creates a new log entry
+func (s *Store) InsertEntry(entry *Entry) error {
+    tx, err := s.db.Begin()
+    if err != nil {
+        return err
+    }
+    defer tx.Rollback()
+    
+    // Insert entry
+    result, err := tx.Exec(`
+        INSERT INTO entries (day_id, timestamp, entry_text, momentum)
+        VALUES (?, ?, ?, ?)
+    `, entry.DayID, entry.Timestamp, entry.EntryText, entry.Momentum)
+    if err != nil {
+        return err
+    }
+    
+    entryID, _ := result.LastInsertId()
+    entry.ID = int(entryID)
+    
+    // Insert tags
+    for _, tag := range entry.Tags {
+        _, err := tx.Exec(`
+            INSERT INTO tags (entry_id, tag_type, tag_value)
+            VALUES (?, ?, ?)
+        `, entryID, tag.TagType, tag.TagValue)
+        if err != nil {
+            return err
+        }
+    }
+    
+    return tx.Commit()
+}
+
+// GetTodayEntries retrieves all entries for today
+func (s *Store) GetTodayEntries(dayID int) ([]*Entry, error) {
+    rows, err := s.db.Query(`
+        SELECT id, day_id, timestamp, entry_text, momentum, created_at
+        FROM entries
+        WHERE day_id = ?
+        ORDER BY timestamp ASC
+    `, dayID)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+    
+    var entries []*Entry
+    for rows.Next() {
+        var e Entry
+        err := rows.Scan(&e.ID, &e.DayID, &e.Timestamp, 
+            &e.EntryText, &e.Momentum, &e.CreatedAt)
+        if err != nil {
+            return nil, err
+        }
+        
+        // Load tags for this entry
+        e.Tags, _ = s.GetEntryTags(e.ID)
+        entries = append(entries, &e)
+    }
+    
+    return entries, nil
+}
+
+// GetEntryTags retrieves all tags for an entry
+func (s *Store) GetEntryTags(entryID int) ([]Tag, error) {
+    rows, err := s.db.Query(`
+        SELECT id, entry_id, tag_type, tag_value
+        FROM tags
+        WHERE entry_id = ?
+    `, entryID)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+    
+    var tags []Tag
+    for rows.Next() {
+        var t Tag
+        if err := rows.Scan(&t.ID, &t.EntryID, &t.TagType, &t.TagValue); err != nil {
+            return nil, err
+        }
+        tags = append(tags, t)
+    }
+    
+    return tags, nil
+}
+
+// GetWeeklyStats calculates statistics for the past 7 days
+func (s *Store) GetWeeklyStats() (*WeeklyStats, error) {
+    weekAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02")
+    
+    // Count entries
+    var totalEntries int
+    s.db.QueryRow(`
+        SELECT COUNT(*) FROM entries e
+        JOIN days d ON e.day_id = d.id
+        WHERE d.date >= ?
+    `, weekAgo).Scan(&totalEntries)
+    
+    // Tag distribution
+    rows, err := s.db.Query(`
+        SELECT t.tag_value, COUNT(*) as count
+        FROM tags t
+        JOIN entries e ON t.entry_id = e.id
+        JOIN days d ON e.day_id = d.id
+        WHERE d.date >= ? AND t.tag_type = 'context'
+        GROUP BY t.tag_value
+    `, weekAgo)
+    if err != nil {
+        return nil, err
+    }
+    defer rows.Close()
+    
+    tagCounts := make(map[string]int)
+    for rows.Next() {
+        var tag string
+        var count int
+        rows.Scan(&tag, &count)
+        tagCounts[tag] = count
+    }
+    
+    return &WeeklyStats{
+        TotalEntries: totalEntries,
+        TagCounts:    tagCounts,
+    }, nil
+}
+
+type WeeklyStats struct {
+    TotalEntries int
+    TagCounts    map[string]int
+}
+```
+
+---
+
+## Bubble Tea TUI Components
+
+### Main Log Entry Screen
+
+```go
+// internal/tui/log_entry.go
+
+package tui
+
+import (
+    "fmt"
+    "strings"
+    "time"
+    
+    "github.com/charmbracelet/bubbles/textinput"
+    tea "github.com/charmbracelet/bubbletea"
+    "github.com/charmbracelet/lipgloss"
+)
+
+type LogEntryModel struct {
+    input        textinput.Model
+    timestamp    time.Time
+    lastLogTime  time.Time
+    entryCount   int
+    isDriftAlert bool
+    width        int
+    height       int
+}
+
+func NewLogEntryModel(lastLog time.Time, count int) LogEntryModel {
+    ti := textinput.New()
+    ti.Placeholder = "What are you doing right now?"
+    ti.Focus()
+    ti.Width = 80
+    
+    now := time.Now()
+    isDrift := now.Sub(lastLog).Minutes() >= 90
+    
+    return LogEntryModel{
+        input:        ti,
+        timestamp:    now,
+        lastLogTime:  lastLog,
+        entryCount:   count,
+        isDriftAlert: isDrift,
+    }
+}
+
+func (m LogEntryModel) Init() tea.Cmd {
+    return textinput.Blink
+}
+
+func (m LogEntryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    switch msg := msg.(type) {
+    case tea.KeyMsg:
+        switch msg.Type {
+        case tea.KeyEnter:
+            // Submit entry
+            return m, func() tea.Msg {
+                return SubmitEntryMsg{
+                    Text:      m.input.Value(),
+                    Timestamp: m.timestamp,
+                }
+            }
+        case tea.KeyCtrlC, tea.KeyEsc:
+            return m, tea.Quit
+        }
+    case tea.WindowSizeMsg:
+        m.width = msg.Width
+        m.height = msg.Height
+    }
+    
+    var cmd tea.Cmd
+    m.input, cmd = m.input.Update(msg)
+    return m, cmd
+}
+
+func (m LogEntryModel) View() string {
+    var b strings.Builder
+    
+    // Header
+    b.WriteString(headerStyle.Render("DAYLOG - " + 
+        time.Now().Format("Monday, January 2, 2006")))
+    b.WriteString("\n")
+    b.WriteString(dimStyle.Render(fmt.Sprintf("Started: %s", 
+        m.timestamp.Format("3:04pm"))))
+    b.WriteString("\n\n")
+    
+    // Drift alert
+    if m.isDriftAlert {
+        duration := time.Since(m.lastLogTime)
+        alert := fmt.Sprintf("⚠️  DRIFT ALERT - Last log was %s ago", 
+            formatDuration(duration))
+        b.WriteString(alertStyle.Render(alert))
+        b.WriteString("\n\n")
+    }
+    
+    // Input prompt
+    b.WriteString(boldStyle.Render(m.timestamp.Format("3:04pm") + 
+        " | What are you doing right now?"))
+    b.WriteString("\n\n")
+    b.WriteString(m.input.View())
+    b.WriteString("\n\n")
+    
+    // Helper text
+    b.WriteString(dimStyle.Render(
+        "↑ ↓ → | @deep @social @admin @break @zone | [LEAK] [FLOW] [STUCK] [GOLD]"))
+    
+    return boxStyle.Render(b.String())
+}
+
+type SubmitEntryMsg struct {
+    Text      string
+    Timestamp time.Time
+}
+
+func formatDuration(d time.Duration) string {
+    hours := int(d.Hours())
+    mins := int(d.Minutes()) % 60
+    if hours > 0 {
+        return fmt.Sprintf("%dh %dm", hours, mins)
+    }
+    return fmt.Sprintf("%dm", mins)
+}
+```
+
+### Sign-off Screen
+
+```go
+// internal/tui/signoff.go
+
+package tui
+
+import (
+    "strings"
+    
+    "github.com/charmbracelet/bubbles/textinput"
+    tea "github.com/charmbracelet/bubbletea"
+)
+
+type SignoffModel struct {
+    inputs   []textinput.Model
+    focused  int
+    complete bool
+}
+
+func NewSignoffModel(intention string) SignoffModel {
+    inputs := make([]textinput.Model, 3)
+    
+    questions := []string{
+        "What pulled you off track today?",
+        "What kept you on track today?",
+        "One thing you'll protect tomorrow?",
+    }
+    
+    for i, q := range questions {
+        ti := textinput.New()
+        ti.Placeholder = q
+        ti.Width = 60
+        if i == 0 {
+            ti.Focus()
+        }
+        inputs[i] = ti
+    }
+    
+    return SignoffModel{
+        inputs:  inputs,
+        focused: 0,
+    }
+}
+
+func (m SignoffModel) Init() tea.Cmd {
+    return textinput.Blink
+}
+
+func (m SignoffModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    switch msg := msg.(type) {
+    case tea.KeyMsg:
+        switch msg.Type {
+        case tea.KeyEnter:
+            if m.focused < len(m.inputs)-1 {
+                m.inputs[m.focused].Blur()
+                m.focused++
+                m.inputs[m.focused].Focus()
+                return m, textinput.Blink
+            } else {
+                // All questions answered
+                return m, func() tea.Msg {
+                    return SignoffCompleteMsg{
+                        PulledOffTrack:  m.inputs[0].Value(),
+                        KeptOnTrack:     m.inputs[1].Value(),
+                        TomorrowProtect: m.inputs[2].Value(),
+                    }
+                }
+            }
+        case tea.KeyCtrlC, tea.KeyEsc:
+            return m, tea.Quit
+        case tea.KeyTab, tea.KeyShiftTab:
+            if msg.Type == tea.KeyTab {
+                m.focused = (m.focused + 1) % len(m.inputs)
+            } else {
+                m.focused = (m.focused - 1 + len(m.inputs)) % len(m.inputs)
+            }
+            
+            for i := range m.inputs {
+                if i == m.focused {
+                    m.inputs[i].Focus()
+                } else {
+                    m.inputs[i].Blur()
+                }
+            }
+            return m, textinput.Blink
+        }
+    }
+    
+    cmd := m.updateInputs(msg)
+    return m, cmd
+}
+
+func (m *SignoffModel) updateInputs(msg tea.Msg) tea.Cmd {
+    cmds := make([]tea.Cmd, len(m.inputs))
+    
+    for i := range m.inputs {
+        m.inputs[i], cmds[i] = m.inputs[i].Update(msg)
+    }
+    
+    return tea.Batch(cmds...)
+}
+
+func (m SignoffModel) View() string {
+    var b strings.Builder
+    
+    b.WriteString(headerStyle.Render("DAY COMPLETE 🌙"))
+    b.WriteString("\n\n")
+    
+    for i, input := range m.inputs {
+        b.WriteString(input.View())
+        if i < len(m.inputs)-1 {
+            b.WriteString("\n\n")
+        }
+    }
+    
+    b.WriteString("\n\n")
+    b.WriteString(dimStyle.Render("Tab/Shift+Tab to navigate • Enter to submit"))
+    
+    return boxStyle.Render(b.String())
+}
+
+type SignoffCompleteMsg struct {
+    PulledOffTrack  string
+    KeptOnTrack     string
+    TomorrowProtect string
+}
+```
+
+---
+
+## Styles
+
+```go
+// internal/tui/styles.go
+
+package tui
+
+import "github.com/charmbracelet/lipgloss"
+
+var (
+    boxStyle = lipgloss.NewStyle().
+        Border(lipgloss.RoundedBorder()).
+        BorderForeground(lipgloss.Color("62")).
+        Padding(1, 2).
+        Width(80)
+    
+    headerStyle = lipgloss.NewStyle().
+        Bold(true).
+        Foreground(lipgloss.Color("205")).
+        MarginBottom(1)
+    
+    dimStyle = lipgloss.NewStyle().
+        Foreground(lipgloss.Color("240"))
+    
+    boldStyle = lipgloss.NewStyle().
+        Bold(true)
+    
+    alertStyle = lipgloss.NewStyle().
+        Foreground(lipgloss.Color("208")).
+        Bold(true)
+    
+    successStyle = lipgloss.NewStyle().
+        Foreground(lipgloss.Color("42")).
+        Bold(true)
+)
+```
+
+---
+
+## Markdown Generation
+
+```go
+// internal/markdown/writer.go
+
+package markdown
+
+import (
+    "fmt"
+    "os"
+    "path/filepath"
+    "strings"
+    "time"
+    
+    "daylog/internal/database"
+)
+
+type Writer struct {
+    outputDir string
+}
+
+func NewWriter(outputDir string) *Writer {
+    return &Writer{outputDir: outputDir}
+}
+
+// GenerateDaylog creates markdown file for a completed day
+func (w *Writer) GenerateDaylog(day *database.Day, entries []*database.Entry) error {
+    filename := filepath.Join(w.outputDir, 
+        day.Date.Format("2006-01-02")+".md")
+    
+    var b strings.Builder
+    
+    // Header
+    b.WriteString(fmt.Sprintf("# DAYLOG - %s\n\n", 
+        day.Date.Format("Monday, January 2, 2006")))
+    
+    // Intention
+    if day.Intention != nil && *day.Intention != "" {
+        b.WriteString(fmt.Sprintf("**Intention:** %s\n\n", *day.Intention))
+    }
+    
+    b.WriteString("---\n\n")
+    
+    // Entries
+    for _, entry := range entries {
+        timeStr := entry.Timestamp.Format("3:04pm")
+        
+        // Build entry line with tags
+        line := fmt.Sprintf("- %s | %s", timeStr, entry.EntryText)
+        
+        // Add momentum
+        if entry.Momentum != nil {
+            switch *entry.Momentum {
+            case "up":
+                line += " ↑"
+            case "down":
+                line += " ↓"
+            case "neutral":
+                line += " →"
+            }
+        }
+        
+        // Add tags
+        for _, tag := range entry.Tags {
+            line += " " + tag.TagValue
+        }
+        
+        b.WriteString(line + "\n")
+    }
+    
+    // Win
+    if day.Win != nil && *day.Win != "" {
+        b.WriteString(fmt.Sprintf("\n**Win:** %s 🌟\n", *day.Win))
+    }
+    
+    // Reflection
+    if day.PulledOffTrack != nil || day.KeptOnTrack != nil || 
+        day.TomorrowProtect != nil {
+        b.WriteString("\n---\n\n**Reflection:**\n")
+        
+        if day.PulledOffTrack != nil {
+            b.WriteString(fmt.Sprintf("- Pulled off track: %s\n", 
+                *day.PulledOffTrack))
+        }
+        if day.KeptOnTrack != nil {
+            b.WriteString(fmt.Sprintf("- Kept on track: %s\n", 
+                *day.KeptOnTrack))
+        }
+        if day.TomorrowProtect != nil {
+            b.WriteString(fmt.Sprintf("- Tomorrow protect: %s\n", 
+                *day.TomorrowProtect))
+        }
+    }
+    
+    return os.WriteFile(filename, []byte(b.String()), 0644)
+}
+
+// AppendEntry adds a single entry to today's markdown (real-time)
+func (w *Writer) AppendEntry(day *database.Day, entry *database.Entry) error {
+    filename := filepath.Join(w.outputDir, 
+        day.Date.Format("2006-01-02")+".md")
+    
+    // Create or append to file
+    f, err := os.OpenFile(filename, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+    if err != nil {
+        return err
+    }
+    defer f.Close()
+    
+    // Check if file is new (needs header)
+    info, _ := f.Stat()
+    if info.Size() == 0 {
+        header := fmt.Sprintf("# DAYLOG - %s\n\n", 
+            day.Date.Format("Monday, January 2, 2006"))
+        if day.Intention != nil && *day.Intention != "" {
+            header += fmt.Sprintf("**Intention:** %s\n\n", *day.Intention)
+        }
+        header += "---\n\n"
+        f.WriteString(header)
+    }
+    
+    // Format entry
+    timeStr := entry.Timestamp.Format("3:04pm")
+    line := fmt.Sprintf("- %s | %s", timeStr, entry.EntryText)
+    
+    if entry.Momentum != nil {
+        switch *entry.Momentum {
+        case "up":
+            line += " ↑"
+        case "down":
+            line += " ↓"
+        case "neutral":
+            line += " →"
+        }
+    }
+    
+    for _, tag := range entry.Tags {
+        line += " " + tag.TagValue
+    }
+    
+    _, err = f.WriteString(line + "\n")
+    return err
+}
+```
+
+---
+
+## CLI Entry Point
+
+```go
+// cmd/log/main.go
+
+package main
+
+import (
+    "fmt"
+    "os"
+    "path/filepath"
+    
+    tea "github.com/charmbracelet/bubbletea"
+    "daylog/internal/database"
+    "daylog/internal/tui"
+)
+
+func main() {
+    if len(os.Args) < 2 {
+        runLogEntry()
+        return
+    }
+    
+    switch os.Args[1] {
+    case "view":
+        viewToday()
+    case "yesterday":
+        viewYesterday()
+    case "week":
+        viewWeek()
+    case "stats":
+        showStats()
+    default:
+        runLogEntry()
+    }
+}
+
+func runLogEntry() {
+    // Initialize database
+    homeDir, _ := os.UserHomeDir()
+    dbPath := filepath.Join(homeDir, ".daylog", "daylog.db")
+    
+    store, err := database.NewStore(dbPath)
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+        os.Exit(1)
+    }
+    
+    // Get or create today
+    day, err := store.GetOrCreateToday()
+    if err != nil {
+        fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+        os.Exit(1)
+    }
+    
+    // Get today's entries for context
+    entries, _ := store.GetTodayEntries(day.ID)
+    
+    var lastLogTime time.Time
+    if len(entries) > 0 {
+        lastLogTime = entries[len(entries)-1].Timestamp
+    }
+    
+    // Launch TUI
+    model := tui.NewLogEntryModel(lastLogTime, len(entries))
+    p := tea.NewProgram(model)
+    
+    if _, err := p.Run(); err != nil {
+        fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+        os.Exit(1)
+    }
+}
+
+func viewToday() {
+    // Implementation for viewing today's log
+    fmt.Println("View today's log...")
+}
+
+func viewYesterday() {
+    // Implementation for viewing yesterday's log
+    fmt.Println("View yesterday's log...")
+}
+
+func viewWeek() {
+    // Implementation for weekly review
+    fmt.Println("Weekly review...")
+}
+
+func showStats() {
+    // Implementation for statistics
+    fmt.Println("Statistics...")
+}
+```
+
+---
+
+## Implementation Phases
+
+### Phase 1: Core Functionality (Week 1)
+- [ ] Set up project structure
+- [ ] Database schema and migrations
+- [ ] Basic models and CRUD operations
+- [ ] Simple log entry TUI (text input only)
+- [ ] Markdown append on each log
+- [ ] `log` command works end-to-end
+
+### Phase 2: Smart Features (Week 2)
+- [ ] Parse tags and momentum from entries
+- [ ] Drift detection (90min alert)
+- [ ] Morning intention prompt
+- [ ] 10-entry win prompt
+- [ ] Sign-off flow with 3 questions
+- [ ] Generate complete markdown on sign-off
+
+### Phase 3: Viewing & Stats (Week 3)
+- [ ] `log view` - display today's log
+- [ ] `log yesterday` - display previous day
+- [ ] `log stats` - weekly statistics
+- [ ] Tag distribution charts (ASCII)
+- [ ] Momentum visualization
+
+### Phase 4: Intelligence (Week 4)
+- [ ] `log week` - pattern analysis
+- [ ] Flag grouping (LEAK, FLOW, STUCK, GOLD)
+- [ ] Energy pattern recognition
+- [ ] Redirect prompts for distraction keywords
+- [ ] Anchor point suggestions (midday/evening)
+
+### Phase 5: Polish (Week 5)
+- [ ] Confetti animation for sign-off
+- [ ] Glamour rendering for markdown display
+- [ ] Better styling with Lip Gloss
+- [ ] Error handling and edge cases
+- [ ] Config file support
+- [ ] Installation documentation
+
+---
+
+## Key Implementation Notes
+
+### Tag Parsing
+Use regex to extract tags and momentum from entry text:
+```go
+func parseEntry(text string) (momentum *string, tags []Tag) {
+    // Match momentum: ↑ ↓ →
+    momentumRegex := regexp.MustCompile(`(↑|↓|→)`)
+    
+    // Match context tags: @word
+    contextRegex := regexp.MustCompile(`@(\w+)`)
+    
+    // Match flag tags: [WORD]
+    flagRegex := regexp.MustCompile(`\[([A-Z]+)\]`)
+    
+    // Extract momentum
+    if match := momentumRegex.FindString(text); match != "" {
+        var m string
+        switch match {
+        case "↑":
+            m = "up"
+        case "↓":
+            m = "down"
+        case "→":
+            m = "neutral"
+        }
+        momentum = &m
+    }
+    
+    // Extract context tags
+    contextMatches := contextRegex.FindAllStringSubmatch(text, -1)
+    for _, match := range contextMatches {
+        tags = append(tags, Tag{
+            TagType:  "context",
+            TagValue: "@" + match[1],
+        })
+    }
+    
+    // Extract flag tags
+    flagMatches := flagRegex.FindAllStringSubmatch(text, -1)
+    for _, match := range flagMatches {
+        tags = append(tags, Tag{
+            TagType:  "flag",
+            TagValue: "[" + match[1] + "]",
+        })
+    }
+    
+    return momentum, tags
+}
+```
+
+### Drift Detection
+Check time since last log:
+```go
+func checkDrift(lastLogTime time.Time) (isDrift bool, duration time.Duration) {
+    duration = time.Since(lastLogTime)
+    isDrift = duration.Minutes() >= 90
+    return
+}
+```
+
+### Confetti Animation
+Use Bubble Tea's tick command:
+```go
+type ConfettiModel struct {
+    frame    int
+    maxFrame int
+}
+
+func (m ConfettiModel) Init() tea.Cmd {
+    return tick()
+}
+
+func tick() tea.Cmd {
+    return tea.Tick(time.Millisecond*100, func(t time.Time) tea.Msg {
+        return tickMsg(t)
+    })
+}
+
+type tickMsg time.Time
+
+func (m ConfettiModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+    switch msg.(type) {
+    case tickMsg:
+        m.frame++
+        if m.frame >= m.maxFrame {
+            return m, tea.Quit
+        }
+        return m, tick()
+    }
+    return m, nil
+}
+
+func (m ConfettiModel) View() string {
+    // Animate confetti falling
+    confetti := []string{"✨", "🎉", "🎊"}
+    
+    var b strings.Builder
+    for i := 0; i < 5; i++ {
+        b.WriteString(strings.Repeat(" ", rand.Intn(10)))
+        b.WriteString(confetti[rand.Intn(len(confetti))])
+    }
+    
+    return b.String()
+}
+```
+
+---
+
+## Testing Strategy
+
+### Unit Tests
+
+```go
+// internal/database/db_test.go
+
+package database
+
+import (
+    "testing"
+    "time"
+)
+
+func TestGetOrCreateToday(t *testing.T) {
+    store, err := NewStore(":memory:")
+    if err != nil {
+        t.Fatal(err)
+    }
+    
+    day, err := store.GetOrCreateToday()
+    if err != nil {
+        t.Fatal(err)
+    }
+    
+    if day.ID == 0 {
+        t.Error("Expected day ID to be set")
+    }
+    
+    // Second call should return same day
+    day2, err := store.GetOrCreateToday()
+    if err != nil {
+        t.Fatal(err)
+    }
+    
+    if day.ID != day2.ID {
+        t.Error("Expected same day on second call")
+    }
+}
+
+func TestInsertEntry(t *testing.T) {
+    store, _ := NewStore(":memory:")
+    day, _ := store.GetOrCreateToday()
+    
+    momentum := "up"
+    entry := &Entry{
+        DayID:     day.ID,
+        Timestamp: time.Now(),
+        EntryText: "Working on tests",
+        Momentum:  &momentum,
+        Tags: []Tag{
+            {TagType: "context", TagValue: "@deep"},
+        },
+    }
+    
+    err := store.InsertEntry(entry)
+    if err != nil {
+        t.Fatal(err)
+    }
+    
+    if entry.ID == 0 {
+        t.Error("Expected entry ID to be set")
+    }
+}
+
+func TestTagParsing(t *testing.T) {
+    text := "Writing code ↑ @deep [FLOW]"
+    momentum, tags := parseEntry(text)
+    
+    if *momentum != "up" {
+        t.Errorf("Expected momentum 'up', got '%s'", *momentum)
+    }
+    
+    if len(tags) != 2 {
+        t.Errorf("Expected 2 tags, got %d", len(tags))
+    }
+    
+    // Verify context tag
+    if tags[0].TagValue != "@deep" {
+        t.Errorf("Expected '@deep', got '%s'", tags[0].TagValue)
+    }
+    
+    // Verify flag tag
+    if tags[1].TagValue != "[FLOW]" {
+        t.Errorf("Expected '[FLOW]', got '%s'", tags[1].TagValue)
+    }
+}
+```
+
+### Integration Tests
+
+```go
+// internal/app/app_test.go
+
+package app
+
+import (
+    "os"
+    "path/filepath"
+    "testing"
+)
+
+func TestEndToEndLogFlow(t *testing.T) {
+    // Create temp directory
+    tmpDir, _ := os.MkdirTemp("", "daylog-test")
+    defer os.RemoveAll(tmpDir)
+    
+    dbPath := filepath.Join(tmpDir, "test.db")
+    logDir := filepath.Join(tmpDir, "logs")
+    os.MkdirAll(logDir, 0755)
+    
+    // Initialize app
+    app := NewApp(dbPath, logDir)
+    
+    // Set intention
+    err := app.SetIntention("Test intention")
+    if err != nil {
+        t.Fatal(err)
+    }
+    
+    // Log entries
+    entries := []string{
+        "Morning standup ↑ @social",
+        "Deep work session ↑ @deep [FLOW]",
+        "Checking email → @admin",
+    }
+    
+    for _, text := range entries {
+        err := app.LogEntry(text)
+        if err != nil {
+            t.Fatal(err)
+        }
+    }
+    
+    // Verify entries saved
+    todayEntries, err := app.GetTodayEntries()
+    if err != nil {
+        t.Fatal(err)
+    }
+    
+    if len(todayEntries) != 3 {
+        t.Errorf("Expected 3 entries, got %d", len(todayEntries))
+    }
+    
+    // Verify markdown file created
+    mdPath := filepath.Join(logDir, time.Now().Format("2006-01-02")+".md")
+    if _, err := os.Stat(mdPath); os.IsNotExist(err) {
+        t.Error("Markdown file not created")
+    }
+}
+```
+
+---
+
+## Performance Considerations
+
+### Database Optimization
+
+1. **Indexes**: Already created on frequently queried columns
+   - `idx_entries_day` for day lookups
+   - `idx_entries_timestamp` for time-based queries
+   - `idx_tags_type_value` for tag filtering
+
+2. **Prepared Statements**: Reuse for frequent queries
+```go
+type Store struct {
+    db              *sql.DB
+    insertEntryStmt *sql.Stmt
+    insertTagStmt   *sql.Stmt
+}
+
+func (s *Store) prepareStatements() error {
+    var err error
+    
+    s.insertEntryStmt, err = s.db.Prepare(`
+        INSERT INTO entries (day_id, timestamp, entry_text, momentum)
+        VALUES (?, ?, ?, ?)
+    `)
+    if err != nil {
+        return err
+    }
+    
+    s.insertTagStmt, err = s.db.Prepare(`
+        INSERT INTO tags (entry_id, tag_type, tag_value)
+        VALUES (?, ?, ?)
+    `)
+    
+    return err
+}
+```
+
+3. **Batch Operations**: Use transactions for multiple inserts
+
+4. **Pattern Cache**: Pre-compute weekly patterns
+```go
+// Run nightly or on-demand
+func (s *Store) UpdatePatternCache() error {
+    // Clear old cache
+    _, err := s.db.Exec(`DELETE FROM pattern_cache WHERE date < date('now', '-30 days')`)
+    if err != nil {
+        return err
+    }
+    
+    // Recompute patterns for last 7 days
+    _, err = s.db.Exec(`
+        INSERT OR REPLACE INTO pattern_cache (date, pattern_type, pattern_value, count)
+        SELECT 
+            DATE(d.date) as date,
+            t.tag_type as pattern_type,
+            t.tag_value as pattern_value,
+            COUNT(*) as count
+        FROM tags t
+        JOIN entries e ON t.entry_id = e.id
+        JOIN days d ON e.day_id = d.id
+        WHERE d.date >= date('now', '-7 days')
+        GROUP BY date, pattern_type, pattern_value
+    `)
+    
+    return err
+}
+```
+
+### Markdown File Size
+
+- Each day is a separate file (keeps files small)
+- Append-only writes (efficient for most filesystems)
+- Optional archiving: move old files to `daylogs/archive/2025/`
+
+### TUI Performance
+
+- Use `tea.Batch` for multiple commands
+- Lazy load historical data (only when viewing)
+- Keep models focused (separate screens for different flows)
+
+---
+
+## Configuration
+
+### Config File Structure
+```yaml
+# ~/.daylog/config.yaml
+
+database:
+  path: ~/.daylog/daylog.db
+
+markdown:
+  output_dir: ~/Documents/daylogs
+  archive_after_days: 90
+
+features:
+  drift_threshold_minutes: 90
+  show_confetti: true
+  enable_redirect_prompts: true
+  
+notifications:
+  reminder_enabled: false
+  reminder_interval_minutes: 60
+
+appearance:
+  theme: default  # default, dark, light
+  use_emojis: true
+```
+
+### Loading Config
+```go
+// internal/config/config.go
+
+package config
+
+import (
+    "os"
+    "path/filepath"
+    
+    "gopkg.in/yaml.v3"
+)
+
+type Config struct {
+    Database      DatabaseConfig      `yaml:"database"`
+    Markdown      MarkdownConfig      `yaml:"markdown"`
+    Features      FeaturesConfig      `yaml:"features"`
+    Notifications NotificationsConfig `yaml:"notifications"`
+    Appearance    AppearanceConfig    `yaml:"appearance"`
+}
+
+type DatabaseConfig struct {
+    Path string `yaml:"path"`
+}
+
+type MarkdownConfig struct {
+    OutputDir       string `yaml:"output_dir"`
+    ArchiveAfterDays int   `yaml:"archive_after_days"`
+}
+
+type FeaturesConfig struct {
+    DriftThresholdMinutes int  `yaml:"drift_threshold_minutes"`
+    ShowConfetti          bool `yaml:"show_confetti"`
+    EnableRedirectPrompts bool `yaml:"enable_redirect_prompts"`
+}
+
+type NotificationsConfig struct {
+    ReminderEnabled         bool `yaml:"reminder_enabled"`
+    ReminderIntervalMinutes int  `yaml:"reminder_interval_minutes"`
+}
+
+type AppearanceConfig struct {
+    Theme     string `yaml:"theme"`
+    UseEmojis bool   `yaml:"use_emojis"`
+}
+
+func Load() (*Config, error) {
+    homeDir, _ := os.UserHomeDir()
+    configPath := filepath.Join(homeDir, ".daylog", "config.yaml")
+    
+    // Return defaults if config doesn't exist
+    if _, err := os.Stat(configPath); os.IsNotExist(err) {
+        return DefaultConfig(), nil
+    }
+    
+    data, err := os.ReadFile(configPath)
+    if err != nil {
+        return nil, err
+    }
+    
+    var config Config
+    if err := yaml.Unmarshal(data, &config); err != nil {
+        return nil, err
+    }
+    
+    return &config, nil
+}
+
+func DefaultConfig() *Config {
+    homeDir, _ := os.UserHomeDir()
+    
+    return &Config{
+        Database: DatabaseConfig{
+            Path: filepath.Join(homeDir, ".daylog", "daylog.db"),
+        },
+        Markdown: MarkdownConfig{
+            OutputDir:       filepath.Join(homeDir, "Documents", "daylogs"),
+            ArchiveAfterDays: 90,
+        },
+        Features: FeaturesConfig{
+            DriftThresholdMinutes: 90,
+            ShowConfetti:          true,
+            EnableRedirectPrompts: true,
+        },
+        Notifications: NotificationsConfig{
+            ReminderEnabled:         false,
+            ReminderIntervalMinutes: 60,
+        },
+        Appearance: AppearanceConfig{
+            Theme:     "default",
+            UseEmojis: true,
+        },
+    }
+}
+```
+
+---
+
+## Deployment & Distribution
+
+### Building
+
+```bash
+# Build for current platform
+go build -o daylog cmd/log/main.go
+
+# Cross-compile for multiple platforms
+GOOS=darwin GOARCH=amd64 go build -o daylog-darwin-amd64 cmd/log/main.go
+GOOS=darwin GOARCH=arm64 go build -o daylog-darwin-arm64 cmd/log/main.go
+GOOS=linux GOARCH=amd64 go build -o daylog-linux-amd64 cmd/log/main.go
+GOOS=windows GOARCH=amd64 go build -o daylog-windows-amd64.exe cmd/log/main.go
+```
+
+### Installation Script
+
+```bash
+#!/bin/bash
+# install.sh
+
+set -e
+
+OS=$(uname -s | tr '[:upper:]' '[:lower:]')
+ARCH=$(uname -m)
+
+if [ "$ARCH" = "x86_64" ]; then
+    ARCH="amd64"
+elif [ "$ARCH" = "arm64" ] || [ "$ARCH" = "aarch64" ]; then
+    ARCH="arm64"
+fi
+
+BINARY="daylog-${OS}-${ARCH}"
+INSTALL_DIR="/usr/local/bin"
+
+echo "Downloading DAYLOG for ${OS}-${ARCH}..."
+curl -L "https://github.com/yourusername/daylog/releases/latest/download/${BINARY}" -o daylog
+
+chmod +x daylog
+sudo mv daylog "${INSTALL_DIR}/log"
+
+echo "✅ DAYLOG installed successfully!"
+echo "Run 'log' to start logging"
+```
+
+### Homebrew Formula (macOS/Linux)
+
+```ruby
+# daylog.rb
+class Daylog < Formula
+  desc "CLI-based accountability system for managing unstructured time"
+  homepage "https://github.com/yourusername/daylog"
+  url "https://github.com/yourusername/daylog/archive/v0.1.0.tar.gz"
+  sha256 "..."
+  license "MIT"
+
+  depends_on "go" => :build
+
+  def install
+    system "go", "build", *std_go_args(ldflags: "-s -w"), "./cmd/log"
+    bin.install "log" => "log"
+  end
+
+  test do
+    system "#{bin}/log", "--version"
+  end
+end
+```
+
+### GitHub Actions CI/CD
+
+```yaml
+# .github/workflows/release.yml
+
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        goos: [linux, darwin, windows]
+        goarch: [amd64, arm64]
+        exclude:
+          - goos: windows
+            goarch: arm64
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up Go
+        uses: actions/setup-go@v4
+        with:
+          go-version: '1.21'
+      
+      - name: Build
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+        run: |
+          go build -o daylog-${{ matrix.goos }}-${{ matrix.goarch }} cmd/log/main.go
+      
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: binaries
+          path: daylog-*
+  
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Download artifacts
+        uses: actions/download-artifact@v3
+        with:
+          name: binaries
+      
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: daylog-*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+---
+
+## Documentation
+
+### README.md
+
+```markdown
+# DAYLOG
+
+Live Ongoing Genuine Accountability
+
+A CLI-based system to manage unstructured time through honest, real-time logging.
+
+## Installation
+
+**macOS/Linux (curl):**
+```bash
+curl -sSL https://raw.githubusercontent.com/yourusername/daylog/main/install.sh | bash
+```
+
+**Homebrew:**
+```bash
+brew install yourusername/tap/daylog
+```
+
+**From Source:**
+```bash
+go install github.com/yourusername/daylog/cmd/log@latest
+```
+
+## Quick Start
+
+```bash
+# Start logging
+log
+
+# View today's log
+log view
+
+# See weekly stats
+log stats
+
+# View weekly patterns
+log week
+```
+
+## Philosophy
+
+Awareness precedes change. DAYLOG creates consciousness at decision points while maintaining zero friction for actual logging.
+
+## Features
+
+- 🎯 Morning intention setting
+- ⚡ Real-time logging with momentum tracking
+- 🏷️  Context tags (@deep, @social, @admin, @break, @zone)
+- 🚩 Pattern flags ([LEAK], [FLOW], [STUCK], [GOLD])
+- 📊 Weekly analytics and insights
+- 🌙 End-of-day reflection ritual
+- 📝 Human-readable markdown files
+
+## Documentation
+
+Full documentation at [docs.daylog.app](https://docs.daylog.app)
+
+## License
+
+MIT
+```
+
+---
+
+## Error Handling
+
+### Graceful Degradation
+
+```go
+// If SQLite fails, still allow markdown-only mode
+func (a *App) LogEntry(text string) error {
+    entry := parseEntryText(text)
+    
+    // Try database first
+    if err := a.store.InsertEntry(entry); err != nil {
+        log.Printf("Warning: Database write failed: %v", err)
+        // Continue with markdown-only
+    }
+    
+    // Always write markdown
+    return a.markdown.AppendEntry(a.day, entry)
+}
+
+// Recovery function
+func (a *App) RecoverFromMarkdown() error {
+    files, err := filepath.Glob(filepath.Join(a.markdownDir, "*.md"))
+    if err != nil {
+        return err
+    }
+    
+    for _, file := range files {
+        if err := a.markdown.ImportToDatabase(file, a.store); err != nil {
+            log.Printf("Warning: Failed to import %s: %v", file, err)
+            continue
+        }
+    }
+    
+    return nil
+}
+```
+
+---
+
+## Security Considerations
+
+1. **Local-first**: All data stays on user's machine
+2. **No network calls**: Completely offline
+3. **File permissions**: Use 0600 for database, 0644 for markdown
+4. **No sensitive data**: Never log passwords or secrets
+5. **SQL injection**: Use parameterized queries (already implemented)
+
+---
+
+## Future Enhancements
+
+### Phase 6+
+
+- [ ] `log search [keyword]` - Full-text search
+- [ ] `log export --format pdf` - Export as styled PDF
+- [ ] `log insights` - AI-powered pattern suggestions
+- [ ] `log streaks` - Consecutive logging days
+- [ ] Custom user-defined tags
+- [ ] Calendar integration (read-only)
+- [ ] Web dashboard (optional, local server)
+- [ ] Mobile companion app (view-only)
+- [ ] Team sharing (encrypted, opt-in)
+
+---
+
+## Getting Started Checklist
+
+- [ ] Initialize Go module: `go mod init github.com/yourusername/daylog`
+- [ ] Install dependencies: `go get` all required packages
+- [ ] Create directory structure
+- [ ] Implement database schema and migrations
+- [ ] Build basic TUI with Bubble Tea
+- [ ] Test log entry flow end-to-end
+- [ ] Add markdown generation
+- [ ] Implement tag parsing
+- [ ] Add stats commands
+- [ ] Polish UI with Lip Gloss
+- [ ] Write tests
+- [ ] Create installation script
+- [ ] Write documentation
+- [ ] Set up CI/CD
+- [ ] Release v0.1.0
+
+---
+
+## Development Commands
+
+```bash
+# Run locally
+go run cmd/log/main.go
+
+# Run tests
+go test ./...
+
+# Run tests with coverage
+go test -cover ./...
+
+# Build
+go build -o log cmd/log/main.go
+
+# Install locally
+go install ./cmd/log
+
+# Format code
+go fmt ./...
+
+# Lint
+golangci-lint run
+```
+
+---
+
+## Troubleshooting
+
+### Database locked error
+```bash
+# Check for stale lock
+rm ~/.daylog/daylog.db-shm ~/.daylog/daylog.db-wal
+
+# Or use WAL mode (already in migrations)
+PRAGMA journal_mode=WAL;
+```
+
+### Markdown files not generating
+```bash
+# Check permissions
+ls -la ~/Documents/daylogs
+
+# Check config
+cat ~/.daylog/config.yaml
+
+# Force regeneration
+log export --regenerate
+```
+
+### TUI rendering issues
+```bash
+# Check terminal support
+echo $TERM
+
+# Try different terminal
+# iTerm2, Alacritty, or WezTerm recommended
+```
+
+---
+
+This implementation guide provides a complete roadmap for building DAYLOG. Start with Phase 1 and iterate from there!

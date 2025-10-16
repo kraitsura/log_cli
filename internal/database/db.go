@@ -314,6 +314,106 @@ func (s *Store) DeleteEntry(entryID int) error {
 	return nil
 }
 
+// GetDayByDate retrieves a day record by date string (YYYY-MM-DD format)
+// Returns nil, nil if day doesn't exist
+func (s *Store) GetDayByDate(dateStr string) (*Day, error) {
+	var day Day
+	err := s.db.QueryRow(`
+		SELECT id, date, intention, win, pulled_off_track,
+		       kept_on_track, tomorrow_protect, completed, created_at
+		FROM days WHERE date = ?
+	`, dateStr).Scan(
+		&day.ID, &day.Date, &day.Intention, &day.Win,
+		&day.PulledOffTrack, &day.KeptOnTrack, &day.TomorrowProtect,
+		&day.Completed, &day.CreatedAt,
+	)
+
+	if err == sql.ErrNoRows {
+		return nil, nil
+	}
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query day: %w", err)
+	}
+
+	return &day, nil
+}
+
+// GetDaysInRange retrieves all days within a date range (inclusive)
+// Dates should be in YYYY-MM-DD format
+func (s *Store) GetDaysInRange(startDate, endDate string) ([]*Day, error) {
+	rows, err := s.db.Query(`
+		SELECT id, date, intention, win, pulled_off_track,
+		       kept_on_track, tomorrow_protect, completed, created_at
+		FROM days
+		WHERE date >= ? AND date <= ?
+		ORDER BY date ASC
+	`, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query days: %w", err)
+	}
+	defer rows.Close()
+
+	var days []*Day
+	for rows.Next() {
+		var d Day
+		err := rows.Scan(&d.ID, &d.Date, &d.Intention, &d.Win,
+			&d.PulledOffTrack, &d.KeptOnTrack, &d.TomorrowProtect,
+			&d.Completed, &d.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan day: %w", err)
+		}
+		days = append(days, &d)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	return days, nil
+}
+
+// GetEntriesForDateRange retrieves all entries within a date range (inclusive)
+// Returns entries with tags loaded, ordered by timestamp
+func (s *Store) GetEntriesForDateRange(startDate, endDate string) ([]*Entry, error) {
+	rows, err := s.db.Query(`
+		SELECT e.id, e.day_id, e.timestamp, e.entry_text, e.momentum, e.created_at
+		FROM entries e
+		JOIN days d ON e.day_id = d.id
+		WHERE d.date >= ? AND d.date <= ?
+		ORDER BY e.timestamp ASC
+	`, startDate, endDate)
+	if err != nil {
+		return nil, fmt.Errorf("failed to query entries: %w", err)
+	}
+	defer rows.Close()
+
+	var entries []*Entry
+	for rows.Next() {
+		var e Entry
+		err := rows.Scan(&e.ID, &e.DayID, &e.Timestamp,
+			&e.EntryText, &e.Momentum, &e.CreatedAt)
+		if err != nil {
+			return nil, fmt.Errorf("failed to scan entry: %w", err)
+		}
+
+		// Load tags for this entry
+		tags, err := s.GetEntryTags(e.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to get tags: %w", err)
+		}
+		e.Tags = tags
+
+		entries = append(entries, &e)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("row iteration error: %w", err)
+	}
+
+	return entries, nil
+}
+
 // GetWeeklyStats calculates statistics for the past 7 days
 func (s *Store) GetWeeklyStats() (*WeeklyStats, error) {
 	weekAgo := time.Now().AddDate(0, 0, -7).Format("2006-01-02")

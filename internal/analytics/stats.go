@@ -9,7 +9,8 @@ import (
 )
 
 // FormatWeeklyStats formats weekly statistics for display
-func FormatWeeklyStats(stats *database.WeeklyStats) string {
+// Now includes momentum distribution if momentumStats is provided
+func FormatWeeklyStats(stats *database.WeeklyStats, momentumStats *MomentumStats) string {
 	var b strings.Builder
 
 	b.WriteString("THIS WEEK\n")
@@ -52,6 +53,27 @@ func FormatWeeklyStats(stats *database.WeeklyStats) string {
 		}
 	} else {
 		b.WriteString("No context tags logged this week\n")
+	}
+
+	// Momentum distribution (if provided)
+	if momentumStats != nil && (momentumStats.UpCount > 0 || momentumStats.DownCount > 0 || momentumStats.NeutralCount > 0 || momentumStats.BackCount > 0) {
+		b.WriteString("\n")
+		b.WriteString("MOMENTUM THIS WEEK:\n\n")
+
+		totalWithMomentum := momentumStats.UpCount + momentumStats.DownCount + momentumStats.NeutralCount + momentumStats.BackCount
+
+		if totalWithMomentum > 0 {
+			// Calculate percentages
+			upPct := float64(momentumStats.UpCount) / float64(totalWithMomentum) * 100
+			neutralPct := float64(momentumStats.NeutralCount) / float64(totalWithMomentum) * 100
+			downPct := float64(momentumStats.DownCount) / float64(totalWithMomentum) * 100
+			backPct := float64(momentumStats.BackCount) / float64(totalWithMomentum) * 100
+
+			b.WriteString(fmt.Sprintf("↑ Productive:  %2d (%.0f%%)\n", momentumStats.UpCount, upPct))
+			b.WriteString(fmt.Sprintf("→ Neutral:     %2d (%.0f%%)\n", momentumStats.NeutralCount, neutralPct))
+			b.WriteString(fmt.Sprintf("↓ Dragging:    %2d (%.0f%%)\n", momentumStats.DownCount, downPct))
+			b.WriteString(fmt.Sprintf("← Waste:       %2d (%.0f%%)\n", momentumStats.BackCount, backPct))
+		}
 	}
 
 	return b.String()

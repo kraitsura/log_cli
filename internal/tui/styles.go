@@ -85,6 +85,12 @@ var (
 	SelectedStyle = lipgloss.NewStyle().
 			Foreground(colorAccent).
 			Bold(true)
+
+	// Pattern-specific color styles (for weekly review)
+	FlowStyle  = SuccessStyle // Green for [FLOW] patterns
+	GoldStyle  = AccentStyle  // Cyan for [GOLD] patterns
+	StuckStyle = WarningStyle // Orange for [STUCK] patterns
+	LeakStyle  = ErrorStyle   // Red for [LEAK] patterns
 )
 
 // Box Styles

@@ -50,7 +50,8 @@ log_cli/
 ├── docs/
 │   ├── daylog-system-spec.md       # System specification
 │   ├── daylog_implementation.txt   # Implementation guide
-│   └── PROGRESS.md                 # Progress tracking
+│   ├── PROGRESS.md                 # Upcoming work tracking
+│   └── CHANGELOG.md                # Completed work history
 ├── daylogs/                        # Generated markdown files
 │   └── .gitkeep
 ├── go.mod
@@ -221,9 +222,10 @@ query := fmt.Sprintf("SELECT * FROM entries WHERE day_id = %d", dayID)
 
 ### 1. Progress Tracking
 **MUST UPDATE** `docs/PROGRESS.md` after completing any task:
-- Mark checkbox as complete
-- Add timestamp and brief note
-- Document any blockers or decisions made
+- Update current status and mark checkboxes for upcoming work
+- PROGRESS.md tracks ONLY planned/upcoming features (forward-looking)
+- Move completed work to `docs/CHANGELOG.md` with timestamps and details
+- Document any blockers or decisions in appropriate file
 
 ### 2. Testing Requirements
 - Write unit tests for database operations
@@ -274,7 +276,8 @@ query := fmt.Sprintf("SELECT * FROM entries WHERE day_id = %d", dayID)
 
 - **System Spec**: `docs/daylog-system-spec.md` - User-facing features and flows
 - **Implementation Guide**: `docs/daylog_implementation.txt` - Detailed technical guide
-- **Progress Tracking**: `docs/PROGRESS.md` - Current status and completed tasks
+- **Progress Tracking**: `docs/PROGRESS.md` - Current status and upcoming planned work
+- **Changelog**: `docs/CHANGELOG.md` - Complete history of completed phases and features
 
 ## Philosophy
 
@@ -319,9 +322,10 @@ When working on this project, Claude should:
 1. Always reference the spec files for feature details
 2. Follow Go best practices and idioms
 3. Keep code simple and maintainable
-4. Update PROGRESS.md after each completed task
-5. Test database operations thoroughly
-6. Ensure TUI responsiveness and good UX
+4. Update PROGRESS.md after each completed task (keep forward-looking)
+5. Move completed work to CHANGELOG.md with full details
+6. Test database operations thoroughly
+7. Ensure TUI responsiveness and good UX
 
 ## Quick Commands Reference
 

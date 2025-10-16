@@ -6,6 +6,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ConfirmDeleteModel is the model for the delete confirmation screen
@@ -69,8 +70,26 @@ func (m ConfirmDeleteModel) View() string {
 	b.WriteString(info)
 	b.WriteString("\n\n")
 
-	// Show entry text in a styled box
-	entryPreview := BoxStyle.Render(m.entryText)
+	// Calculate responsive width for entry preview (85% of terminal width, or 60 chars default)
+	previewWidth := 60
+	if m.width > 0 {
+		previewWidth = int(float64(m.width) * 0.85)
+		if previewWidth < 40 {
+			previewWidth = 40 // minimum width
+		}
+		if previewWidth > 80 {
+			previewWidth = 80 // maximum width for readability
+		}
+	}
+
+	// Apply width constraint and word wrap to entry text
+	entryStyle := lipgloss.NewStyle().
+		Width(previewWidth).
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(lipgloss.Color("#44475A")).
+		Padding(1, 2)
+
+	entryPreview := entryStyle.Render(m.entryText)
 	b.WriteString(entryPreview)
 	b.WriteString("\n\n")
 

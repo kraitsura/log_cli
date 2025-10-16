@@ -2,6 +2,7 @@ package tui
 
 import (
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 )
@@ -10,7 +11,8 @@ import (
 type AutocompleteState struct {
 	Active         bool
 	TriggerChar    string   // "@" or "["
-	TriggerPos     int      // Position in text where trigger was typed
+	TriggerPos     int      // Position in text where trigger was typed (in runes)
+	TriggerPosBytes int     // Position in bytes for string slicing
 	FilterText     string   // Text after trigger for filtering
 	Suggestions    []string // Filtered list of suggestions
 	SelectedIndex  int      // Currently selected suggestion
@@ -29,40 +31,69 @@ func NewAutocompleteState() AutocompleteState {
 	}
 }
 
-// Update updates autocomplete state based on current text and cursor position
-func (a *AutocompleteState) Update(text string, cursorPos int) {
+// runeIndexToByte converts a rune index to a byte index in a string
+func runeIndexToByte(s string, runeIndex int) int {
+	if runeIndex <= 0 {
+		return 0
+	}
+	byteIndex := 0
+	for i := 0; i < runeIndex && byteIndex < len(s); i++ {
+		_, size := utf8.DecodeRuneInString(s[byteIndex:])
+		byteIndex += size
+	}
+	return byteIndex
+}
+
+// byteIndexToRune converts a byte index to a rune index in a string
+func byteIndexToRune(s string, byteIndex int) int {
+	if byteIndex <= 0 {
+		return 0
+	}
+	return utf8.RuneCountInString(s[:byteIndex])
+}
+
+// Update updates autocomplete state based on current text and cursor position (in runes)
+func (a *AutocompleteState) Update(text string, cursorPosRunes int) {
+	// Convert rune position to byte position for string operations
+	cursorPosBytes := runeIndexToByte(text, cursorPosRunes)
+
 	// Find if there's a trigger character before cursor
-	triggerPos := -1
+	triggerPosBytes := -1
 	var triggerChar string
 
-	// Look backwards from cursor to find trigger
-	for i := cursorPos - 1; i >= 0; i-- {
-		ch := string(text[i])
+	// Look backwards from cursor (in bytes) to find trigger
+	i := cursorPosBytes
+	for i > 0 {
+		// Decode the previous rune
+		r, size := utf8.DecodeLastRuneInString(text[:i])
+		i -= size
+
+		ch := string(r)
 		if ch == "@" || ch == "[" {
 			triggerChar = ch
-			triggerPos = i
+			triggerPosBytes = i
 			break
 		}
-		// Stop if we hit whitespace or another trigger
-		if ch == " " || ch == "@" || ch == "[" {
+		// Stop if we hit whitespace
+		if ch == " " {
 			break
 		}
 	}
 
-	// If no trigger found or trigger is not immediately accessible, deactivate
-	if triggerPos == -1 {
+	// If no trigger found, deactivate
+	if triggerPosBytes == -1 {
 		a.Active = false
 		return
 	}
 
 	// Check if there's text between trigger and cursor that would break autocomplete
 	// (e.g., closing bracket for [ or space)
-	textBetween := text[triggerPos:cursorPos]
+	textBetween := text[triggerPosBytes:cursorPosBytes]
 	if triggerChar == "[" && strings.Contains(textBetween, "]") {
 		a.Active = false
 		return
 	}
-	if strings.Contains(textBetween[1:], " ") {
+	if len(textBetween) > 1 && strings.Contains(textBetween[1:], " ") {
 		a.Active = false
 		return
 	}
@@ -70,8 +101,12 @@ func (a *AutocompleteState) Update(text string, cursorPos int) {
 	// Activate autocomplete
 	a.Active = true
 	a.TriggerChar = triggerChar
-	a.TriggerPos = triggerPos
-	a.FilterText = text[triggerPos+1 : cursorPos]
+	a.TriggerPosBytes = triggerPosBytes
+	a.TriggerPos = byteIndexToRune(text, triggerPosBytes)
+
+	// Extract filter text (skip the trigger character itself)
+	triggerSize := len(triggerChar)
+	a.FilterText = text[triggerPosBytes+triggerSize : cursorPosBytes]
 
 	// Filter suggestions
 	a.Suggestions = a.filterSuggestions()
@@ -142,30 +177,46 @@ func (a *AutocompleteState) GetSelectedSuggestion() string {
 	return a.Suggestions[a.SelectedIndex]
 }
 
-// InsertSuggestion returns the text with the selected suggestion inserted
-func (a *AutocompleteState) InsertSuggestion(currentText string) string {
+// InsertSuggestion returns the text with the selected suggestion inserted and the new cursor position (in runes)
+func (a *AutocompleteState) InsertSuggestion(currentText string) (string, int) {
 	if !a.Active {
-		return currentText
+		return currentText, utf8.RuneCountInString(currentText)
 	}
 
 	suggestion := a.GetSelectedSuggestion()
 	if suggestion == "" {
-		return currentText
+		return currentText, utf8.RuneCountInString(currentText)
 	}
 
-	// Find cursor position (end of filter text)
-	cursorPos := a.TriggerPos + 1 + len(a.FilterText)
+	// Use byte positions for string slicing
+	// Find cursor position in bytes (end of filter text)
+	filterTextBytes := len(a.FilterText)
+	triggerSizeBytes := len(a.TriggerChar)
+	cursorPosBytes := a.TriggerPosBytes + triggerSizeBytes + filterTextBytes
 
 	// Build new text: before trigger + suggestion + space + after cursor
-	before := currentText[:a.TriggerPos]
-	after := currentText[cursorPos:]
+	before := currentText[:a.TriggerPosBytes]
+	after := currentText[cursorPosBytes:]
 
 	// Add space after suggestion if not already present
+	newText := before + suggestion
+	addedSpace := false
 	if !strings.HasPrefix(after, " ") && after != "" {
-		suggestion += " "
+		newText += " "
+		addedSpace = true
+	}
+	newText += after
+
+	// Calculate new cursor position in RUNES (for textinput)
+	// Count runes in: before + suggestion + optional space
+	beforeRunes := utf8.RuneCountInString(before)
+	suggestionRunes := utf8.RuneCountInString(suggestion)
+	newCursorPosRunes := beforeRunes + suggestionRunes
+	if addedSpace {
+		newCursorPosRunes++ // Add 1 for the space
 	}
 
-	return before + suggestion + after
+	return newText, newCursorPosRunes
 }
 
 // Deactivate turns off autocomplete
@@ -181,25 +232,18 @@ func (a *AutocompleteState) View() string {
 
 	var b strings.Builder
 
-	// Style for dropdown
-	dropdownStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(lipgloss.Color("240")).
-		Padding(0, 1).
-		MaxWidth(30)
-
+	// Minimalistic styles using project colors
 	itemStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("250"))
+		Foreground(lipgloss.Color("#6272A4")) // Dim gray
 
 	selectedItemStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("205")).
-		Bold(true).
-		Background(lipgloss.Color("238"))
+		Foreground(lipgloss.Color("#8BE9FD")). // Cyan accent
+		Bold(true)
 
-	// Build dropdown content
+	// Build dropdown content - clean, no border
 	for i, suggestion := range a.Suggestions {
 		if i == a.SelectedIndex {
-			b.WriteString(selectedItemStyle.Render("▶ " + suggestion))
+			b.WriteString(selectedItemStyle.Render("› " + suggestion))
 		} else {
 			b.WriteString(itemStyle.Render("  " + suggestion))
 		}
@@ -208,5 +252,5 @@ func (a *AutocompleteState) View() string {
 		}
 	}
 
-	return dropdownStyle.Render(b.String())
+	return b.String()
 }

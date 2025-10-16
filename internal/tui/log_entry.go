@@ -11,20 +11,22 @@ import (
 
 // LogEntryModel is the model for the log entry screen
 type LogEntryModel struct {
-	input        textinput.Model
-	timestamp    time.Time
-	lastLogTime  time.Time
-	entryCount   int
-	isDriftAlert bool
-	width        int
-	height       int
-	submitted    bool
-	entryText    string
-	autocomplete AutocompleteState
+	input                 textinput.Model
+	timestamp             time.Time
+	lastLogTime           time.Time
+	entryCount            int
+	isDriftAlert          bool
+	driftRemovalRequested bool
+	dayCompleted          bool
+	width                 int
+	height                int
+	submitted             bool
+	entryText             string
+	autocomplete          AutocompleteState
 }
 
 // NewLogEntryModel creates a new log entry model
-func NewLogEntryModel(lastLog time.Time, count int) LogEntryModel {
+func NewLogEntryModel(lastLog time.Time, count int, dayCompleted bool) LogEntryModel {
 	ti := textinput.New()
 	ti.Placeholder = "What are you doing right now?"
 	ti.Focus()
@@ -32,18 +34,21 @@ func NewLogEntryModel(lastLog time.Time, count int) LogEntryModel {
 
 	now := time.Now()
 	isDrift := false
-	if !lastLog.IsZero() && now.Sub(lastLog).Minutes() >= 90 {
+	// Only show drift alert if day is not completed and sufficient time has passed
+	if !dayCompleted && !lastLog.IsZero() && now.Sub(lastLog).Minutes() >= 90 {
 		isDrift = true
 	}
 
 	return LogEntryModel{
-		input:        ti,
-		timestamp:    now,
-		lastLogTime:  lastLog,
-		entryCount:   count,
-		isDriftAlert: isDrift,
-		submitted:    false,
-		autocomplete: NewAutocompleteState(),
+		input:                 ti,
+		timestamp:             now,
+		lastLogTime:           lastLog,
+		entryCount:            count,
+		isDriftAlert:          isDrift,
+		driftRemovalRequested: false,
+		dayCompleted:          dayCompleted,
+		submitted:             false,
+		autocomplete:          NewAutocompleteState(),
 	}
 }
 
@@ -71,8 +76,9 @@ func (m LogEntryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case tea.KeyTab, tea.KeyEnter:
 				// If Enter and autocomplete has suggestions, insert suggestion
 				if msg.Type == tea.KeyEnter && m.autocomplete.GetSelectedSuggestion() != "" {
-					newText := m.autocomplete.InsertSuggestion(m.input.Value())
+					newText, newCursorPos := m.autocomplete.InsertSuggestion(m.input.Value())
 					m.input.SetValue(newText)
+					m.input.SetCursor(newCursorPos)
 					m.autocomplete.Deactivate()
 					return m, nil
 				}
@@ -80,8 +86,9 @@ func (m LogEntryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if msg.Type == tea.KeyTab {
 					suggestion := m.autocomplete.GetSelectedSuggestion()
 					if suggestion != "" {
-						newText := m.autocomplete.InsertSuggestion(m.input.Value())
+						newText, newCursorPos := m.autocomplete.InsertSuggestion(m.input.Value())
 						m.input.SetValue(newText)
+						m.input.SetCursor(newCursorPos)
 						m.autocomplete.Deactivate()
 						return m, nil
 					}
@@ -95,6 +102,14 @@ func (m LogEntryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle normal key presses
 		switch msg.Type {
+		case tea.KeyRunes:
+			// Check for 'r' key when drift alert is active
+			if m.isDriftAlert && len(msg.Runes) > 0 && msg.Runes[0] == 'r' {
+				// User wants to remove drift alert
+				m.driftRemovalRequested = true
+				m.isDriftAlert = false
+				return m, nil
+			}
 		case tea.KeyEnter:
 			// Submit entry (only if not handled by autocomplete above)
 			if m.input.Value() != "" {
@@ -117,24 +132,32 @@ func (m LogEntryModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	// If text changed, apply momentum conversion and update autocomplete
 	if m.input.Value() != previousValue {
-		newValue := m.input.Value()
+		oldValue := m.input.Value()
+		cursorPos := m.input.Position()
 
 		// Apply real-time momentum marker conversion
-		newValue = convertMomentumMarkers(newValue)
+		newValue := convertMomentumMarkers(oldValue)
 
-		// Update input if changed
-		if newValue != m.input.Value() {
-			cursorPos := m.input.Position()
+		// Update input if conversion changed the text
+		if newValue != oldValue {
+			// Calculate cursor position adjustment due to text length change
+			// Count how many characters were added/removed before the cursor
+			beforeCursor := oldValue[:cursorPos]
+			convertedBefore := convertMomentumMarkers(beforeCursor)
+			cursorDelta := len(convertedBefore) - len(beforeCursor)
+
 			m.input.SetValue(newValue)
-			// Adjust cursor position if needed (momentum markers change text length)
-			if cursorPos > len(newValue) {
-				m.input.SetCursor(len(newValue))
-			} else {
-				m.input.SetCursor(cursorPos)
+			// Adjust cursor position based on text length change
+			newCursorPos := cursorPos + cursorDelta
+			if newCursorPos > len(newValue) {
+				newCursorPos = len(newValue)
+			} else if newCursorPos < 0 {
+				newCursorPos = 0
 			}
+			m.input.SetCursor(newCursorPos)
 		}
 
-		// Update autocomplete state
+		// Update autocomplete state with current text and cursor position
 		m.autocomplete.Update(m.input.Value(), m.input.Position())
 	}
 
@@ -164,6 +187,9 @@ func (m LogEntryModel) View() string {
 		duration := time.Since(m.lastLogTime)
 		alert := fmt.Sprintf("[!] DRIFT ALERT - Last log was %s ago", formatDuration(duration))
 		b.WriteString(AlertStyle.Render(alert))
+		b.WriteString("\n")
+		driftHelp := "Press 'r' to log stepped away, or continue logging"
+		b.WriteString(DimStyle.Render(driftHelp))
 		b.WriteString("\n\n")
 	}
 
@@ -185,19 +211,21 @@ func (m LogEntryModel) View() string {
 		b.WriteString("\n")
 	}
 
-	// Helper text - show shortcuts for momentum
-	helperText := "Momentum: ++ -- == << (or -> <-) for ↑ ↓ → ←"
-	b.WriteString(DimStyle.Render(helperText))
-	b.WriteString("\n")
-	helperTags := "@deep @social @admin @break @zone | [LEAK] [FLOW] [STUCK] [GOLD]"
-	b.WriteString(DimStyle.Render(helperTags))
+	// Helper text - sleek and minimal
+	shortcuts := "++ productive  -- dragging  == steady  << waste"
+	tags := "@deep @zone @break"
+	flags := "[LEAK] [FLOW] [STUCK]"
+	separator := DimStyle.Render(" • ")
+
+	quickRef := shortcuts + separator + tags + separator + flags
+	b.WriteString(DimStyle.Render(quickRef))
 	b.WriteString("\n\n")
 
-	// Control hints - update to show Tab option when autocomplete is active
+	// Control hints - context aware
 	if m.autocomplete.Active {
-		b.WriteString(DimStyle.Render("↑↓ to navigate • Tab/Enter to select • Esc to close • Ctrl+C to cancel"))
+		b.WriteString(DimStyle.Render("↑↓ navigate • Tab/Enter select • Esc close • Ctrl+C cancel"))
 	} else {
-		b.WriteString(DimStyle.Render("Enter to submit • Ctrl+C to cancel"))
+		b.WriteString(DimStyle.Render("Enter to log • Ctrl+C exit • log help for full guide"))
 	}
 
 	return BoxStyle.Render(b.String())
@@ -211,6 +239,11 @@ func (m LogEntryModel) GetEntryText() string {
 // WasSubmitted returns whether the entry was submitted
 func (m LogEntryModel) WasSubmitted() bool {
 	return m.submitted
+}
+
+// WasDriftRemovalRequested returns whether the user requested drift removal
+func (m LogEntryModel) WasDriftRemovalRequested() bool {
+	return m.driftRemovalRequested
 }
 
 // formatDuration formats a duration into a human-readable string

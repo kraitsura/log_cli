@@ -190,13 +190,9 @@ func (w *Writer) GenerateCompleteDaylog(day *database.Day, entries []*database.E
 	}
 
 	// Write regular entries (before sign-off)
+	// Wins now appear inline as entries with 🌟 prefix
 	for _, entry := range regularEntries {
 		content.WriteString(w.formatEntry(entry) + "\n")
-	}
-
-	// Win if present
-	if day.Win != nil && *day.Win != "" {
-		content.WriteString(fmt.Sprintf("\n**Win:** %s\n", *day.Win))
 	}
 
 	// Reflection section if sign-off completed

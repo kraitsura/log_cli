@@ -104,7 +104,7 @@ func (m SignoffModel) View() string {
 	var b strings.Builder
 
 	// Header
-	b.WriteString(HeaderStyle.Render("DAY COMPLETE ☾"))
+	b.WriteString(HeaderStyle.Render("DAY COMPLETE 🌙"))
 	b.WriteString("\n\n")
 
 	// Show intention if set

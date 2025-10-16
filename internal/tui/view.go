@@ -5,20 +5,27 @@ import (
 	"time"
 
 	"github.com/aaryareddy/log_cli/internal/database"
+	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
 // ViewModel is the model for viewing today's log entries
 type ViewModel struct {
-	day     *database.Day
-	entries []*database.Entry
+	day              *database.Day
+	entries          []*database.Entry
+	viewport         viewport.Model
+	ready            bool
+	textExpanded     bool // Toggle for rolling/unrolling long text
+	maxCollapsedLen  int  // Maximum characters before text is collapsed
 }
 
 // NewViewModel creates a new view model
 func NewViewModel(day *database.Day, entries []*database.Entry) ViewModel {
 	return ViewModel{
-		day:     day,
-		entries: entries,
+		day:             day,
+		entries:         entries,
+		textExpanded:    false, // Start with text collapsed
+		maxCollapsedLen: 100,   // Collapse text longer than 100 chars
 	}
 }
 
@@ -29,21 +36,44 @@ func (m ViewModel) Init() tea.Cmd {
 
 // Update handles messages
 func (m ViewModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	switch msg.(type) {
+	var cmd tea.Cmd
+
+	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Any key press closes the view
-		return m, tea.Quit
+		switch msg.String() {
+		case "q", "esc", "ctrl+c":
+			return m, tea.Quit
+		case "shift+r", "R":
+			// Toggle text expansion
+			m.textExpanded = !m.textExpanded
+			// Regenerate content with new expansion state
+			m.viewport.SetContent(m.generateViewContent())
+			return m, nil
+		}
+	case tea.WindowSizeMsg:
+		if !m.ready {
+			// Initialize viewport on first window size message
+			m.viewport = viewport.New(msg.Width, msg.Height-2)
+			m.viewport.SetContent(m.generateViewContent())
+			m.ready = true
+		} else {
+			m.viewport.Width = msg.Width
+			m.viewport.Height = msg.Height - 2
+		}
 	}
-	return m, nil
+
+	// Update viewport (handles scrolling)
+	m.viewport, cmd = m.viewport.Update(msg)
+	return m, cmd
 }
 
-// View renders the UI
-func (m ViewModel) View() string {
+// generateViewContent generates the log view content
+func (m ViewModel) generateViewContent() string {
 	var b strings.Builder
 
 	// Header with date
 	dateStr := m.day.Date.Format("Monday, January 2, 2006")
-	b.WriteString(HeaderStyle.Render("DAYLOG - " + dateStr))
+	b.WriteString(RenderHeaderBar("DAYLOG", dateStr))
 	b.WriteString("\n\n")
 
 	// Show intention if set
@@ -62,16 +92,8 @@ func (m ViewModel) View() string {
 		// Split entries if day is completed
 		regularEntries, afterHoursEntries := splitEntries(m.entries, m.day.Completed)
 
-		// Display regular entries
-		b.WriteString(formatEntries(regularEntries))
-
-		// Show win if recorded
-		if m.day.Win != nil && *m.day.Win != "" {
-			b.WriteString("\n\n")
-			b.WriteString(SuccessStyle.Render("Win: "))
-			b.WriteString(*m.day.Win)
-			b.WriteString(" ★")
-		}
+		// Display regular entries (wins now appear inline with timestamps)
+		b.WriteString(m.formatEntries(regularEntries))
 
 		// Show reflections if day is completed
 		if m.day.Completed {
@@ -106,14 +128,22 @@ func (m ViewModel) View() string {
 			b.WriteString("\n")
 			b.WriteString(DimStyle.Render("═════════════════════════════════════"))
 			b.WriteString("\n\n")
-			b.WriteString(formatEntries(afterHoursEntries))
+			b.WriteString(m.formatEntries(afterHoursEntries))
 		}
 	}
 
-	b.WriteString("\n\n")
-	b.WriteString(DimStyle.Render("Press any key to close"))
+	return b.String()
+}
 
-	return BoxStyle.Render(b.String())
+// View renders the UI
+func (m ViewModel) View() string {
+	if !m.ready {
+		return "Loading..."
+	}
+
+	viewContent := m.viewport.View() + "\n"
+	viewContent += DimStyle.Render("↑/↓ or j/k to scroll • Shift+R to toggle text • q/esc to exit")
+	return viewContent
 }
 
 // splitEntries separates regular entries from after-hours entries
@@ -155,7 +185,7 @@ func splitEntries(entries []*database.Entry, dayCompleted bool) ([]*database.Ent
 }
 
 // formatEntries formats the list of entries for display
-func formatEntries(entries []*database.Entry) string {
+func (m ViewModel) formatEntries(entries []*database.Entry) string {
 	var b strings.Builder
 
 	for i, entry := range entries {
@@ -168,8 +198,13 @@ func formatEntries(entries []*database.Entry) string {
 		b.WriteString(DimStyle.Render(timeStr))
 		b.WriteString(" | ")
 
-		// Entry text
-		b.WriteString(entry.EntryText)
+		// Entry text - truncate if collapsed and text is long
+		entryText := entry.EntryText
+		if !m.textExpanded && len(entryText) > m.maxCollapsedLen {
+			// Truncate and add indicator
+			entryText = entryText[:m.maxCollapsedLen] + DimStyle.Render("... [Shift+R to expand]")
+		}
+		b.WriteString(entryText)
 
 		// Momentum
 		if entry.Momentum != nil && *entry.Momentum != "" {

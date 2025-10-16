@@ -64,7 +64,7 @@ func (m WinModel) View() string {
 	var b strings.Builder
 
 	// Celebration
-	b.WriteString(HeaderStyle.Render("You've logged 10 entries today!"))
+	b.WriteString(HeaderStyle.Render("You've logged 10 entries today! 💪"))
 	b.WriteString("\n\n")
 
 	// Prompt

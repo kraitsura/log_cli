@@ -4,13 +4,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ThoughtModel is the model for quick thought entry
 type ThoughtModel struct {
-	input       textinput.Model
+	input       textarea.Model
 	timestamp   time.Time
 	width       int
 	height      int
@@ -20,13 +21,18 @@ type ThoughtModel struct {
 
 // NewThoughtModel creates a new thought model
 func NewThoughtModel() ThoughtModel {
-	ti := textinput.New()
-	ti.Placeholder = "What's on your mind?"
-	ti.Focus()
-	ti.Width = 70
+	ta := textarea.New()
+	ta.Placeholder = "What's on your mind? Share what you're working on, feeling, or thinking about..."
+	ta.Focus()
+	ta.ShowLineNumbers = false
+	ta.CharLimit = 0
+
+	// Start with generous height for expansive feel
+	ta.SetHeight(6)
+	ta.SetWidth(70) // Will be updated in WindowSizeMsg
 
 	return ThoughtModel{
-		input:     ti,
+		input:     ta,
 		timestamp: time.Now(),
 		submitted: false,
 	}
@@ -34,7 +40,7 @@ func NewThoughtModel() ThoughtModel {
 
 // Init initializes the model
 func (m ThoughtModel) Init() tea.Cmd {
-	return textinput.Blink
+	return textarea.Blink
 }
 
 // Update handles messages
@@ -42,8 +48,8 @@ func (m ThoughtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.Type {
-		case tea.KeyEnter:
-			// Submit thought
+		case tea.KeyCtrlD:
+			// Ctrl+D to submit thought (Enter creates new lines)
 			if m.input.Value() != "" {
 				m.submitted = true
 				m.thoughtText = m.input.Value()
@@ -56,6 +62,13 @@ func (m ThoughtModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
+
+		// Set textarea width to 85% of terminal width
+		newWidth := int(float64(msg.Width) * 0.85)
+		if newWidth < 40 {
+			newWidth = 40 // minimum width
+		}
+		m.input.SetWidth(newWidth)
 	}
 
 	var cmd tea.Cmd
@@ -71,20 +84,27 @@ func (m ThoughtModel) View() string {
 
 	var b strings.Builder
 
-	b.WriteString(HeaderStyle.Render("💭 QUICK THOUGHT"))
+	// Minimal header
+	b.WriteString(HeaderStyle.Render("💭 THOUGHT"))
 	b.WriteString("\n")
 	b.WriteString(DimStyle.Render(m.timestamp.Format("3:04pm")))
 	b.WriteString("\n\n")
 
-	// Text input
+	// Expansive text area
 	b.WriteString(m.input.View())
 	b.WriteString("\n\n")
 
+	// Simplified helper text
 	b.WriteString(DimStyle.Render("No tags or momentum needed - just your thought"))
-	b.WriteString("\n")
-	b.WriteString(DimStyle.Render("Enter to save • Ctrl+C to cancel"))
+	b.WriteString("\n\n")
+	b.WriteString(DimStyle.Render("Ctrl+D to save • Ctrl+C to cancel"))
 
-	return BoxStyle.Render(b.String())
+	// Use minimal, open box style - no visible border, generous padding
+	openBoxStyle := lipgloss.NewStyle().
+		Border(lipgloss.HiddenBorder()).
+		Padding(2, 3)
+
+	return openBoxStyle.Render(b.String())
 }
 
 // GetThought returns the thought text

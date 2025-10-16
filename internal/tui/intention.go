@@ -64,7 +64,7 @@ func (m IntentionModel) View() string {
 	var b strings.Builder
 
 	// Greeting
-	b.WriteString(HeaderStyle.Render("Good morning! ⋆｡˚☀︎｡⋆˚"))
+	b.WriteString(HeaderStyle.Render("Good morning! ☀️"))
 	b.WriteString("\n\n")
 
 	// Prompt

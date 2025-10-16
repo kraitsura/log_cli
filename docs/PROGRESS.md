@@ -521,13 +521,6 @@
 
 ## Next Steps
 
-### Immediate (Manual Testing)
-1. **Test Phase 3 features** in real terminal
-   - Run `./log` for basic logging with intention and win prompts
-   - Run `./log view` to see today's entries
-   - Run `./log stats` to see weekly statistics
-   - Log entry with `@signoff` tag to test complete sign-off flow and confetti
-
 ### Phase 4 (Essential Utilities)
 1. Implement arrow momentum input solution (`+`, `-`, `=`, `<` shortcuts)
 2. Add back arrow ← for waste/destructive momentum tracking

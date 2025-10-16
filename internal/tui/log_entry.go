@@ -97,7 +97,7 @@ func (m LogEntryModel) View() string {
 	// Drift alert if applicable
 	if m.isDriftAlert {
 		duration := time.Since(m.lastLogTime)
-		alert := fmt.Sprintf("⚠️  DRIFT ALERT - Last log was %s ago", formatDuration(duration))
+		alert := fmt.Sprintf("[!] DRIFT ALERT - Last log was %s ago", formatDuration(duration))
 		b.WriteString(AlertStyle.Render(alert))
 		b.WriteString("\n\n")
 	}
